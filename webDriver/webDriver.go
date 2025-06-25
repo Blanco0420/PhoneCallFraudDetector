@@ -1,6 +1,7 @@
-package webscraping
+package webdriver
 
 import (
+	"PhoneNumberCheck/logging"
 	"fmt"
 	"net"
 	"sync"
@@ -29,27 +30,50 @@ func getFreePort() (int, error) {
 	return listener.Addr().(*net.TCPAddr).Port, nil
 }
 
-func InitializeDriver() (*WebDriverWrapper, error) {
+func retry(attempts int, sleep time.Duration, fn func() error) error {
+	var err error
+	for range attempts {
+		err = fn()
+		if err == nil {
+			return nil
+		}
+		time.Sleep(sleep)
+	}
+	return err
+}
+
+func InitializeDriver(providerName WebScrapingProvider) (*WebDriverWrapper, error) {
 	port, err := getFreePort()
 	if err != nil {
 		return &WebDriverWrapper{}, err
 	}
 	service, err := selenium.NewGeckoDriverService("geckodriver", port)
 	if err != nil {
-		return &WebDriverWrapper{}, fmt.Errorf("Error starting geckodriver service: %v", err)
+		return &WebDriverWrapper{}, fmt.Errorf("error starting geckodriver service: %v", err)
 	}
-	caps := selenium.Capabilities{"browserName": "firefox"}
+
+	profilePath, err := createProfile(providerName)
+	if err != nil {
+		return &WebDriverWrapper{}, err
+	}
+
+	caps := selenium.Capabilities{
+		"browserName": "firefox",
+	}
 	firefoxCaps := firefox.Capabilities{
 		Args: []string{
-			"--headless",
+			// "--headless",
+			"--profile", profilePath,
+			"--noremote",
+		},
+		Prefs: map[string]any{
+			"general.useragent.override": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
 		},
 	}
 	caps.AddFirefox(firefoxCaps)
 	driver, err := selenium.NewRemote(caps, fmt.Sprintf("http://localhost:%d", port))
-	//NOTE:Keep?
-	driver.SetPageLoadTimeout(15 * time.Second)
 	if err != nil {
-		return &WebDriverWrapper{}, fmt.Errorf("Error connecting to remote server: %v", err)
+		return &WebDriverWrapper{}, fmt.Errorf("error connecting to remote server: %v", err)
 	}
 
 	return &WebDriverWrapper{
@@ -59,7 +83,29 @@ func InitializeDriver() (*WebDriverWrapper, error) {
 }
 
 func (w *WebDriverWrapper) GotoUrl(url string) error {
-	return w.driver.Get(url)
+	status, err := getStatusCode(url)
+	if err != nil {
+		return err
+	} else if status != 200 {
+		fmt.Println("not 200")
+		fmt.Println(status)
+		switch status {
+		case 403:
+			logging.Warn().Msg(fmt.Sprintf("rate limited. Waiting until page is ready again"))
+			time.Sleep(60 * time.Second)
+			w.GotoUrl(url)
+		}
+	} else {
+		err := retry(2, 2*time.Second, func() error {
+			return w.driver.Get(url)
+		})
+		return err
+	}
+	// return retry(2, (2 * time.Second), func() error {
+	// 	return w.driver.Get(url)
+	//
+	// })
+	return nil
 }
 
 func (w *WebDriverWrapper) EnterText(selector, text string) error {
@@ -71,27 +117,28 @@ func (w *WebDriverWrapper) EnterText(selector, text string) error {
 }
 
 func (w *WebDriverWrapper) FindElement(selector string) (selenium.WebElement, error) {
-	elem, err := w.driver.FindElement(selenium.ByCSSSelector, selector)
-	if err != nil {
-		return nil, err
-	}
-	return elem, nil
+	var elem selenium.WebElement
+	err := retry(3, 1*time.Second, func() error {
+		var innerErr error
+		elem, innerErr = w.driver.FindElement(selenium.ByCSSSelector, selector)
+		return innerErr
+	})
+	return elem, err
 }
 
 func (w *WebDriverWrapper) FindElements(selector string) ([]selenium.WebElement, error) {
-	elems, err := w.driver.FindElements(selenium.ByCSSSelector, selector)
-	if err != nil {
-		return nil, err
-	}
-	return elems, nil
+	var elems []selenium.WebElement
+	err := retry(2, 1*time.Second, func() error {
+		var innerErr error
+		elems, innerErr = w.driver.FindElements(selenium.ByCSSSelector, selector)
+		return innerErr
+	})
+	return elems, err
 }
 
 func (w *WebDriverWrapper) CheckElementExists(selector string) bool {
 	_, err := w.driver.FindElement(selenium.ByCSSSelector, selector)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }
 
 func (w *WebDriverWrapper) GetInnerText(containerElement selenium.WebElement, selector string) (string, error) {
