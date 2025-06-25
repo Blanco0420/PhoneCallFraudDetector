@@ -1,8 +1,11 @@
 package profanityAnalyzing
 
 import (
+	"PhoneNumberCheck/config"
 	"PhoneNumberCheck/providers"
-	"fmt"
+	"PhoneNumberCheck/utils"
+	"bufio"
+	"os"
 	"strings"
 	"sync"
 
@@ -15,12 +18,48 @@ type commentResult struct {
 	score int
 }
 
+const (
+	LDNOOBWFileName = "LDNOOBW-bad.txt"
+	LDNOOBWRawUrl   = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/refs/heads/master/ja"
+)
+
+func Initialize() error {
+	if exists := utils.CheckIfFileExists(LDNOOBWFileName); !exists {
+		if err := downloadFile(LDNOOBWRawUrl, LDNOOBWFileName); err != nil {
+			return err
+		}
+	}
+
+	file, err := os.Open(LDNOOBWFileName)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if badWords == nil {
+		badWords = make(map[string]struct{})
+	}
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line != "" {
+			badWords[line] = struct{}{}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func scoreComment(comment string) int {
 	score := 0
 	for word := range badWords {
 		if strings.Contains(comment, word) {
 			score += 2
-		} else if levenshtein.ComputeDistance(comment, word) <= LevenshteinThreshold {
+		} else if levenshtein.ComputeDistance(comment, word) <= config.LevenshteinThreshold {
 			score += 1
 		}
 	}
@@ -29,7 +68,6 @@ func scoreComment(comment string) int {
 
 // TODO: Maybe remove concurrency as paramater and make an env var
 func ScoreComments(comments []providers.Comment, concurrency int) int {
-	fmt.Println("Scoring comments...")
 	in := make(chan int, len(comments))
 	out := make(chan int, len(comments))
 

@@ -2,32 +2,12 @@ package profanityAnalyzing
 
 import (
 	"PhoneNumberCheck/config"
-	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/agnivade/levenshtein"
 )
 
 var badWords map[string]struct{}
-var LevenshteinThreshold int
-
-func init() {
-	if levenshteinEnvValue, exists := config.GetEnvVariable("LEVENSHTEIN_THRESHOLD"); !exists {
-		LevenshteinThreshold = 2
-		return
-	} else {
-		parsed, err := strconv.Atoi(levenshteinEnvValue)
-		if err != nil {
-			LevenshteinThreshold = 2
-			return
-		}
-		LevenshteinThreshold = parsed
-	}
-
-	fmt.Println("leven", LevenshteinThreshold)
-
-}
 
 func containsExactMatch(text string) bool {
 	for word := range badWords {
@@ -39,7 +19,7 @@ func containsExactMatch(text string) bool {
 }
 func ContainsFuzzyMatch(text string) bool {
 	for word := range badWords {
-		if levenshtein.ComputeDistance(text, word) <= LevenshteinThreshold {
+		if levenshtein.ComputeDistance(text, word) <= config.LevenshteinThreshold {
 			return true
 		}
 	}
