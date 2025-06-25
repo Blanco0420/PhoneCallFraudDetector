@@ -13,10 +13,11 @@ type NumberRiskInput struct {
 }
 
 type FinalDisplayData struct {
-	BusinessName     []ConfidenceResult
-	LineType         []ConfidenceResult
-	Industry         []ConfidenceResult
-	CompanyOverview  []ConfidenceResult
-	FinalFraudScore  int
-	FinalRecentAbuse bool
+	BusinessName         []ConfidenceResult
+	BusinessNameSuffixes []string
+	LineType             []ConfidenceResult
+	Industry             []ConfidenceResult
+	CompanyOverview      []ConfidenceResult
+	FinalFraudScore      int
+	FinalRecentAbuse     bool
 }

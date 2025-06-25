@@ -2,10 +2,11 @@ package jpnumber
 
 import (
 	japaneseinfo "PhoneNumberCheck/japaneseInfo"
+	"PhoneNumberCheck/logging"
 	providerdataprocessing "PhoneNumberCheck/providerDataProcessing"
 	"PhoneNumberCheck/providers"
 	"PhoneNumberCheck/utils"
-	webscraping "PhoneNumberCheck/webScraping"
+	webdriver "PhoneNumberCheck/webDriver"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -29,27 +30,27 @@ const (
 //TODO: Search for the city in the businessDetails Address (for each (rune?token?) check if exists in japaneseInfo)
 
 type JpNumberSource struct {
-	driver           *webscraping.WebDriverWrapper
-	vitalInfoChannel chan providers.VitalInfo
-	currentVitalInfo *providers.VitalInfo
+	driver *webdriver.WebDriverWrapper
+	// vitalInfoChannel chan providers.VitalInfo
+	// currentVitalInfo *providers.VitalInfo
 }
 
-func (s *JpNumberSource) VitalInfoChannel() <-chan providers.VitalInfo {
-	return s.vitalInfoChannel
-}
-
-func (s *JpNumberSource) CloseVitalInfoChannel() {
-	close(s.vitalInfoChannel)
-}
+// func (s *JpNumberSource) VitalInfoChannel() <-chan providers.VitalInfo {
+// 	return s.vitalInfoChannel
+// }
+//
+// func (s *JpNumberSource) CloseVitalInfoChannel() {
+// 	close(s.vitalInfoChannel)
+// }
 
 func Initialize() (*JpNumberSource, error) {
-	driver, err := webscraping.InitializeDriver()
+	driver, err := webdriver.InitializeDriver(webdriver.JpNumberWebScrapingProvider)
 	if err != nil {
 		return &JpNumberSource{}, err
 	}
 	return &JpNumberSource{
-		driver:           driver,
-		vitalInfoChannel: make(chan providers.VitalInfo),
+		driver: driver,
+		// vitalInfoChannel: make(chan providers.VitalInfo),
 	}, nil
 }
 
@@ -58,7 +59,6 @@ func (s *JpNumberSource) Close() {
 }
 
 func (s *JpNumberSource) getGraphData(graphData *[]providers.GraphData) error {
-	fmt.Println("Getting graph data...")
 	script := `
 	var callback = arguments[arguments.length - 1];
 var interval = setInterval(() => {
@@ -78,7 +78,7 @@ var interval = setInterval(() => {
 	match := re.FindStringSubmatch(scriptText)
 
 	if len(match) == 1 {
-		return fmt.Errorf("No match found.")
+		return fmt.Errorf("no match found")
 	}
 
 	rawGraphDataString := match[1]
@@ -98,7 +98,6 @@ func (s *JpNumberSource) getNumberParts(number string) ([]string, error) {
 }
 
 func (s *JpNumberSource) getDetailsPageURL(lineType providers.LineType, number string) (string, error) {
-	fmt.Println("Gettings detailed page url")
 	// https://www.jpnumber.com/ipphone/numberinfo_050_5482_2807.html
 	var url = baseUrl
 	switch lineType {
@@ -117,7 +116,6 @@ func (s *JpNumberSource) getDetailsPageURL(lineType providers.LineType, number s
 }
 
 func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
-	fmt.Println("getting comments...")
 	var comments []providers.Comment
 	commentsContainer, err := s.driver.FindElement("#result-main-right > span:nth-child(6)")
 	if err != nil {
@@ -129,27 +127,26 @@ func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
 		return []providers.Comment{}, err
 	}
 
-	for i, elem := range commentElements {
+	for _, elem := range commentElements {
 		dateElement, err := elem.FindElement(selenium.ByCSSSelector, commentDateSelector)
 
 		if err != nil {
-			fmt.Printf("COMMENT INDEX: %d", i)
 			elem, err := json.MarshalIndent(dateElement, "", "  ")
 			fmt.Println(string(elem))
-			return []providers.Comment{}, fmt.Errorf("Error getting date Element: %v", err)
+			return []providers.Comment{}, fmt.Errorf("error getting date Element: %v", err)
 		}
 		commentText, err := s.driver.GetInnerText(elem, "div:nth-child(2) > dt:nth-child(1)")
 		if err != nil {
-			return []providers.Comment{}, fmt.Errorf("Comment text error!\n%v\n\n", err)
+			return []providers.Comment{}, fmt.Errorf("comment text error!\n%v", err)
 		}
 		dateText, err := s.driver.GetInnerText(elem, ".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)")
 		if err != nil {
-			return []providers.Comment{}, fmt.Errorf("Comment date error!\n%v\n\n", err)
+			return []providers.Comment{}, fmt.Errorf("comment date error!\n%v", err)
 		}
 
 		parsedDate, err := utils.ParseDate("2006/01/02 15:04:05", dateText)
 		if err != nil {
-			return []providers.Comment{}, fmt.Errorf("Parsing date error:\n%v\n\n", err)
+			return []providers.Comment{}, fmt.Errorf("parsing date error:\n%v", err)
 		}
 
 		comments = append(comments, providers.Comment{Text: commentText, PostDate: parsedDate})
@@ -176,7 +173,6 @@ func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
 
 func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, businessDetails *providers.BusinessDetails) error {
 
-	fmt.Println("getting business info")
 	businessInfoTableContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
 	if err != nil {
 		return fmt.Errorf("no business details available")
@@ -190,7 +186,7 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, business
 		}
 	}
 
-	tableEntries, err := utils.GetTableInformation(s.driver, businessInfoTableElement, "td", "td")
+	tableEntries, err := webdriver.GetTableInformation(s.driver, businessInfoTableElement, "td", "td")
 	if err != nil {
 		return err
 	}
@@ -207,20 +203,23 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, business
 
 		switch key {
 		case "Name", "事業者名称":
-			cleanName, suffixes := utils.CleanCompanyName(value)
+			cleanName, suffixes := utils.GetSuffixesFromCompanyName(&value)
 			data.BusinessDetails.NameSuffixes = suffixes
-			s.currentVitalInfo.Name = cleanName
-			s.vitalInfoChannel <- *s.currentVitalInfo
+			data.VitalInfo.Name = cleanName
+			// s.currentVitalInfo.Name = cleanName
+			// s.vitalInfoChannel <- *s.currentVitalInfo
 		case "Industry", "業種":
-			s.currentVitalInfo.Industry = value
-			s.vitalInfoChannel <- *s.currentVitalInfo
+			// s.currentVitalInfo.Industry = value
+			// s.vitalInfoChannel <- *s.currentVitalInfo
+			data.VitalInfo.Industry = value
 		case "Address", "住所":
 			japaneseinfo.GetAddressInfo(value, &businessDetails.LocationDetails)
 		case "Official website", "公式サイト":
 			businessDetails.Website = value
 		case "Business", "事業紹介":
-			s.currentVitalInfo.CompanyOverview = value
-			s.vitalInfoChannel <- *s.currentVitalInfo
+			// s.currentVitalInfo.CompanyOverview = value
+			// s.vitalInfoChannel <- *s.currentVitalInfo
+			data.VitalInfo.CompanyOverview = value
 		}
 	}
 	return nil
@@ -229,16 +228,21 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, business
 func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error) {
 	numberQuery := fmt.Sprintf("%s/searchnumber.do?number=%s", baseUrl, number)
 	var data providers.NumberDetails
-	s.currentVitalInfo = &data.VitalInfo
+	// s.currentVitalInfo = &data.VitalInfo
 
 	data.Number = number
 	var siteInfo providers.SiteInfo
+
 	s.driver.GotoUrl(numberQuery)
-	fmt.Println("went to page..")
+	s.driver.LoadCookies(webdriver.JpNumberWebScrapingProvider)
+
 	//TODO: use the utils getTableInfo function eventually (jpnumber is difficult and doesn't split their table by tr > th,td . Instead, tr >td,td,td,td for like 3 different key:val pairs)
 
 	// Get line type
 	initialPhoneNumberInfoContainer, err := s.driver.FindElement(initialPhoneNumberInfoSelector)
+	if err != nil {
+		return data, err
+	}
 	text, err := s.driver.GetInnerText(initialPhoneNumberInfoContainer, "dt:nth-child(3)")
 	if err != nil {
 		return data, err
@@ -248,8 +252,9 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	if err != nil {
 		return data, err
 	}
-	s.currentVitalInfo.LineType = lineType
-	s.vitalInfoChannel <- *s.currentVitalInfo
+	// s.currentVitalInfo.LineType = lineType
+	// s.vitalInfoChannel <- *s.currentVitalInfo
+	data.VitalInfo.LineType = lineType
 
 	// goto detailed page
 	detailesPagesUrl, err := s.getDetailsPageURL(lineType, number)
@@ -257,6 +262,7 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 		return data, err
 	}
 	s.driver.GotoUrl(detailesPagesUrl)
+	s.driver.LoadCookies(webdriver.JpNumberWebScrapingProvider)
 
 	if err := s.getBusinessInfo(&data, &data.BusinessDetails); err != nil {
 		if strings.Contains(err.Error(), "no business details available") {
@@ -268,8 +274,7 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	//TODO: Move all of this to another function (getNumberMainInfo)
 	phoneNumberInfoContainer, err := s.driver.FindElement(phoneNumberInfoSelector)
 	if err != nil {
-		fmt.Print(err)
-		panic("phone number info container doesn't exist??")
+		return data, err
 	}
 	prefecture, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(4)>td:nth-child(2)")
 	data.BusinessDetails.LocationDetails.Prefecture = prefecture
@@ -292,7 +297,6 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	if siteInfo.ReviewCount >= 1 {
 		comments, err := s.getComments()
 		if err != nil {
-			fmt.Printf("\n\n\n\nCOMMENTS ERROR: %s\n\n\n\n", number)
 			return data, err
 		}
 		siteInfo.Comments = comments
@@ -311,8 +315,14 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 		Comments:    data.SiteInfo.Comments,
 		RecentAbuse: &data.VitalInfo.FraudulentDetails.RecentAbuse,
 	}
-	s.currentVitalInfo.OverallFraudScore = providerdataprocessing.EvaluateSource(numberRiskInput)
-	s.vitalInfoChannel <- *s.currentVitalInfo
+	go func() {
+		if err := s.driver.SaveCookies(webdriver.JpNumberWebScrapingProvider); err != nil {
+			logging.Error().Err(err).Msg("Failed to save cookies for jpnumber provider")
+		}
+	}()
+	// s.currentVitalInfo.OverallFraudScore = providerdataprocessing.EvaluateSource(numberRiskInput)
+	// s.vitalInfoChannel <- *s.currentVitalInfo
+	data.VitalInfo.OverallFraudScore = providerdataprocessing.EvaluateSource(numberRiskInput)
 
 	return data, nil
 }

@@ -17,6 +17,4 @@ func NewApiConfig(apiKey, baseUrl string) *APIConfig {
 
 type Source interface {
 	GetData(phoneNumber string) (NumberDetails, error)
-	VitalInfoChannel() <-chan VitalInfo
-	CloseVitalInfoChannel()
 }
