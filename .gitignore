@@ -6,6 +6,11 @@
 .direnv
 .envrc
 
+
+### Custom ###
+.firefoxProfiles
+LDNOOBW-bad.txt
+
 .env
 
 **.json
