@@ -2,16 +2,13 @@ package utils
 
 import (
 	"PhoneNumberCheck/providers"
-	webscraping "PhoneNumberCheck/webScraping"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/tebeka/selenium"
 )
 
 var commonSuffixes = []string{
@@ -43,8 +40,8 @@ func ParseDate(layout, date string) (time.Time, error) {
 	return parsedDate, nil
 }
 
-func CleanCompanyName(original string) (cleaned string, foundSuffixes []string) {
-	cleaned = original
+func GetSuffixesFromCompanyName(original *string) (cleaned string, foundSuffixes []string) {
+	cleaned = *original
 	foundSuffixes = []string{}
 	for _, suffix := range commonSuffixes {
 		if strings.Contains(cleaned, suffix) {
@@ -55,8 +52,13 @@ func CleanCompanyName(original string) (cleaned string, foundSuffixes []string) 
 	return
 }
 
+func CheckIfFileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
+}
+
 func CleanText(text string) string {
-	re := regexp.MustCompile(`[^\p{L}\p{N}一]`)
+	re := regexp.MustCompile(`[^\p{L}\p{N}]`)
 	return re.ReplaceAllString(text, "")
 }
 
@@ -103,38 +105,6 @@ func AverageIntSlice(vals []int) int {
 		total += v
 	}
 	return total / len(vals)
-}
-
-func GetTableInformation(d *webscraping.WebDriverWrapper, tableBodyElement selenium.WebElement, tableKeyElementTagName string, tableValueElementTagName string) ([]providers.TableEntry, error) {
-	var tableEntries []providers.TableEntry
-	ignoredTableKeys := []string{"初回クチコミユーザー", "FAX番号", "市外局番", "市内局番", "加入者番号", "電話番号", "推定発信地域"}
-	phoneNumberTableContainerRowElements, err := tableBodyElement.FindElements(selenium.ByCSSSelector, "tr")
-	if err != nil {
-		panic(fmt.Errorf("Could not get phone number info table rows: %v", err))
-	}
-
-	if tableKeyElementTagName == tableValueElementTagName {
-		tableKeyElementTagName = tableKeyElementTagName + ":nth-child(1)"
-		tableValueElementTagName = tableValueElementTagName + ":nth-child(2)"
-	}
-
-	for _, element := range phoneNumberTableContainerRowElements {
-		key, err := d.GetInnerText(element, tableKeyElementTagName)
-		if err != nil {
-			continue
-			//TODO: Fix this?
-		}
-		if slices.Contains(ignoredTableKeys, key) {
-			continue
-		}
-
-		value, err := d.GetInnerText(element, tableValueElementTagName)
-		if err != nil {
-			return tableEntries, err
-		}
-		tableEntries = append(tableEntries, providers.TableEntry{Key: key, Value: value, Element: element})
-	}
-	return tableEntries, nil
 }
 
 func ParseGraphData(rawDataString string, graphData *[]providers.GraphData) error {
