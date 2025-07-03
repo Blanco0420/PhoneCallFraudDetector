@@ -2,19 +2,18 @@ package main
 
 import (
 	"PhoneNumberCheck/config"
+	japanesetokenizing "PhoneNumberCheck/japaneseTokenizing"
+	"PhoneNumberCheck/logging"
+	"PhoneNumberCheck/profanityAnalyzing"
 	providerdataprocessing "PhoneNumberCheck/providerDataProcessing"
 	"PhoneNumberCheck/providers"
 	"PhoneNumberCheck/providers/jpnumber"
 	"PhoneNumberCheck/providers/telnavi"
 	"PhoneNumberCheck/utils"
-	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	_ "net/http/pprof"
-	"os"
-	"runtime/trace"
+	"slices"
 	"sync"
+	"time"
 )
 
 var (
@@ -42,8 +41,32 @@ var (
 	}
 )
 
-func buildFinalDisplayData(data map[string]providers.NumberDetails) providerdataprocessing.FinalDisplayData {
-	var businessNames, lineTypes, industries, businessOverviews []string
+func printFinalDisplayData(data providerdataprocessing.FinalDisplayData) {
+	fmt.Println("Final Display Data:")
+
+	printConfidenceResults := func(title string, results []providerdataprocessing.ConfidenceResult) {
+		fmt.Printf("%s:\n", title)
+		if len(results) == 0 {
+			fmt.Println("  (no data)")
+			return
+		}
+		for _, res := range results {
+			fmt.Printf("  Value: %s, Confidence: %.2f, Sources: %v\n", res.NormalizedValue, res.Confidence, res.Supporters)
+		}
+	}
+
+	printConfidenceResults("Business Names", data.BusinessName)
+	fmt.Printf("All suffixes: %v\n", data.BusinessNameSuffixes)
+	printConfidenceResults("Line Types", data.LineType)
+	printConfidenceResults("Industries", data.Industry)
+	printConfidenceResults("Company Overviews", data.CompanyOverview)
+
+	fmt.Printf("Final Fraud Score: %d\n", data.FinalFraudScore)
+	fmt.Printf("Final Recent Abuse: %v\n", data.FinalRecentAbuse)
+}
+
+func buildFinalDisplayData(data map[string]providers.NumberDetails) (providerdataprocessing.FinalDisplayData, error) {
+	var businessNames, allSuffixes, lineTypes, industries, businessOverviews []string
 	var businessSources, lineTypeSources, industrySources, overviewSources []string
 	var fraudScores []int
 	var recentAbuseCount int
@@ -53,6 +76,15 @@ func buildFinalDisplayData(data map[string]providers.NumberDetails) providerdata
 		if details.VitalInfo.Name != "" {
 			businessNames = append(businessNames, details.VitalInfo.Name)
 			businessSources = append(businessSources, sourceName)
+
+			suffixes := details.BusinessDetails.NameSuffixes
+			if len(suffixes) > 0 {
+				for _, suffix := range suffixes {
+					if !slices.Contains(suffixes, suffix) {
+						allSuffixes = append(suffixes, suffix)
+					}
+				}
+			}
 		}
 		if details.VitalInfo.LineType != "" {
 			lineTypes = append(lineTypes, string(details.VitalInfo.LineType))
@@ -72,19 +104,25 @@ func buildFinalDisplayData(data map[string]providers.NumberDetails) providerdata
 			abuseSeen++
 		}
 	}
+
+	tokenizer, err := japanesetokenizing.Initialize()
+	if err != nil {
+		return providerdataprocessing.FinalDisplayData{}, err
+	}
 	return providerdataprocessing.FinalDisplayData{
-		BusinessName:    providerdataprocessing.CalculateFieldConfidence(businessNames, businessSources),
-		LineType:        providerdataprocessing.CalculateFieldConfidence(lineTypes, lineTypeSources),
-		Industry:        providerdataprocessing.CalculateFieldConfidence(industries, industrySources),
-		CompanyOverview: providerdataprocessing.CalculateFieldConfidence(businessOverviews, overviewSources),
-		FinalFraudScore: utils.AverageIntSlice(fraudScores),
+		BusinessName:         providerdataprocessing.CalculateFieldConfidence(tokenizer, businessNames, businessSources),
+		BusinessNameSuffixes: allSuffixes,
+		LineType:             providerdataprocessing.CalculateFieldConfidence(tokenizer, lineTypes, lineTypeSources),
+		Industry:             providerdataprocessing.CalculateFieldConfidence(tokenizer, industries, industrySources),
+		CompanyOverview:      providerdataprocessing.CalculateFieldConfidence(tokenizer, businessOverviews, overviewSources),
+		FinalFraudScore:      utils.AverageIntSlice(fraudScores),
 		FinalRecentAbuse: func() bool {
 			if abuseSeen == 0 {
 				return false
 			}
 			return recentAbuseCount >= (abuseSeen / 2)
 		}(),
-	}
+	}, nil
 }
 
 func testingProviders(data *map[string]providers.NumberDetails, sources map[string]providers.Source) error {
@@ -111,12 +149,9 @@ func testingProviders(data *map[string]providers.NumberDetails, sources map[stri
 	// }()
 	for localSourceName, localSource := range sources {
 		wg.Add(1)
-		//TODO: actually do something with the channel instead of leaving it
-		go func() {
-			for _ = range localSource.VitalInfoChannel() {
-			}
-		}()
+
 		go func(srcName string, src providers.Source) {
+			//TODO: Actually do something with the channel
 			defer wg.Done()
 			for _, number := range testNums {
 				fmt.Printf("[%s] calling getData\n", srcName)
@@ -128,7 +163,6 @@ func testingProviders(data *map[string]providers.NumberDetails, sources map[stri
 				(*data)[srcName] = sourceData
 				mu.Unlock()
 			}
-			src.CloseVitalInfoChannel()
 			fmt.Printf("[%s] finished GetData and closed channel\n", srcName)
 		}(localSourceName, localSource)
 	}
@@ -137,46 +171,12 @@ func testingProviders(data *map[string]providers.NumberDetails, sources map[stri
 	return nil
 }
 
-func testingOutput(data *map[string][]byte, sources []providers.Source) {
-
-	for sourceIndex, localSource := range sources {
-		go func(src providers.Source) {
-			for v := range src.VitalInfoChannel() {
-				json, err := json.MarshalIndent(v, "", "  ")
-				if err != nil {
-					panic(err)
-				}
-				fmt.Printf("\n\n\n\n\n%s\n\n\n\n\n", string(json))
-			}
-		}(localSource)
-		go func() {
-			for _, number := range testNums {
-				sourceData, err := localSource.GetData(number)
-				if err != nil {
-					panic(err)
-				}
-				sourceString := fmt.Sprintf("source%d", sourceIndex)
-				jsonData, err := json.MarshalIndent(sourceData, "", "  ")
-				if err != nil {
-					panic(err)
-				}
-				(*data)[sourceString] = jsonData
-			}
-			localSource.CloseVitalInfoChannel()
-		}()
-	}
-}
-
-func main() {
-	f, err := os.Create("trace.out")
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	trace.Start(f)
-	defer trace.Stop()
+func startNumberProcessing() {
+	logging.Info().Msg("Loading environment file")
 	config.LoadEnv()
 
+	logging.Info().Msg("Initalizing profanity lists")
+	profanityAnalyzing.Initialize()
 	// TODO: Send error here
 	// jpNumberProvider := jpnumber.Initialize(driver)
 
@@ -189,7 +189,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer jpNumber.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			jpNumber.Close()
+			panic(r)
+		}
+	}()
 
 	// ipqsSource, err := ipqualityscore.Initialize()
 	// if err != nil {
@@ -200,30 +205,34 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer telnavi.Close()
+	defer func() {
+		if r := recover(); r != nil {
+			telnavi.Close()
+			panic(r)
+		}
+	}()
 
-	data := map[string]providers.NumberDetails{}
 	sources := map[string]providers.Source{
 		"jpNumber": jpNumber,
 		// ipqsSource,
 		// numverify,
 		"telnavi": telnavi,
 	}
-	// data = testingOutput(data, sources)
-	go func() {
-		log.Println("Starting pprof server at :6060")
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+
+	data := map[string]providers.NumberDetails{}
+	start := time.Now()
 	err = testingProviders(&data, sources)
 	if err != nil {
 		panic(err)
 	}
-	finalData := buildFinalDisplayData(data)
-	jsonBytes, err := json.MarshalIndent(finalData, "", "  ")
+	_, err = buildFinalDisplayData(data)
 	if err != nil {
-		panic(err)
+		logging.Fatal().Err(err)
 	}
-	fmt.Println(string(jsonBytes))
+	elapsed := time.Since(start)
+	logging.Info().Msg(fmt.Sprintf("Finished. Time taken: %v", elapsed))
+	// Optionally print results for each run:
+	// printFinalDisplayData(finalData)
 	// // for key, val := range data {
 	// // 	json, err := json.MarshalIndent(val, "", "  ")
 	// // 	if err != nil {
@@ -260,4 +269,16 @@ func main() {
 	// pref, exists := japaneseinfo.FindPrefectureByCityName("台東区", 1)
 	// fmt.Println(pref, exists)
 
+}
+
+func main() {
+	fmt.Println("heelo")
+	time.Sleep(5 * time.Second)
+	// webcamdetection.StartWebcamCapture()
+	// cameraConfig := webcamdetection.StartCameraWithControls()
+	// jsonData, err := json.MarshalIndent(cameraConfig, "", "  ")
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// fmt.Println(string(jsonData))
 }
