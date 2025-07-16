@@ -1,0 +1,42 @@
+services:
+  number-backend:
+    build:
+      context: ./backend
+      target: ${NUMBER__APP_ENV:-prod}
+    image: number-backend:latest
+    container_name: number-backend
+    volumes:
+      # - /home/blanco/Pictures/phone pictures/WIN_20250630_16_05_20_Pro.jpg
+      - ./backend:/app
+    networks:
+      - number
+    ports:
+      # Dev port
+      - 40000:40000
+    # develop:
+    #   watch:
+    #     - path: ./backend
+    #       target: /app
+    #       action: sync
+  number-frontend:
+    build:
+      context: ./frontend
+      target: ${NUMBER__APP_ENV:-prod}
+    image: number-frontend:latest
+    container_name: number-frontend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # volumes:
+    #   - ./frontend/vite-app:/app
+    networks:
+      - number
+    ports:
+      - 3000:80
+    develop:
+      watch:
+        - path: ./frontend
+          target: /app
+          action: sync
+
+networks:
+  number:
