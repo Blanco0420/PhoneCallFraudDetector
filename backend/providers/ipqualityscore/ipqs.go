@@ -47,7 +47,7 @@ type rawApiData struct {
 func Initialize() (*IpqsSource, error) {
 	apiKey, exists := os.LookupEnv("PROVIDERS__IPQS_API_KEY")
 	if !exists {
-		return &IpqsSource{}, fmt.Errorf("Error, apiKey environment variable not set")
+		return &IpqsSource{}, fmt.Errorf("error, apiKey environment variable not set")
 	}
 	baseUrl := "https://www.ipqualityscore.com/api/json/phone/" + apiKey + "/<NUMBER>?country[]=JP"
 	config := providers.NewApiConfig(apiKey, baseUrl)
@@ -57,7 +57,7 @@ func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error
 	requestUrl := strings.Replace(i.config.BaseUrl, "<NUMBER>", phoneNumber, 1)
 	res, err := i.config.HttpClient.Get(requestUrl)
 	if err != nil {
-		return providers.NumberDetails{}, fmt.Errorf("Error: %v", err)
+		return providers.NumberDetails{}, fmt.Errorf("error: %v", err)
 	}
 	defer res.Body.Close()
 
@@ -72,7 +72,7 @@ func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error
 	}
 
 	if !rawData.Success {
-		return providers.NumberDetails{}, fmt.Errorf("Error getting data from source:\n%v", rawData.Errors)
+		return providers.NumberDetails{}, fmt.Errorf("error getting data from source:\n%v", rawData.Errors)
 	}
 
 	switch v := rawData.IdentityData.(type) {
@@ -91,10 +91,10 @@ func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error
 
 	data := providers.NumberDetails{
 		Number:  phoneNumber,
-		Carrier: rawData.Carrier,
+		Carrier: &rawData.Carrier,
 		VitalInfo: providers.VitalInfo{
 			LineType: lineType,
-			Name:     rawData.Name,
+			Name:     &rawData.Name,
 			FraudulentDetails: providers.FraudulentDetails{
 				FraudScore:  rawData.FraudScore,
 				RecentAbuse: rawData.RecentAbuse,

@@ -3,13 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
-	"net/http"
+	"os"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Blanco0420/Phone-Number-Check/backend/config"
+	databasedriver "github.com/Blanco0420/Phone-Number-Check/backend/databaseDriver"
+	"github.com/Blanco0420/Phone-Number-Check/backend/ent"
 	japanesetokenizing "github.com/Blanco0420/Phone-Number-Check/backend/japaneseTokenizing"
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
 	"github.com/Blanco0420/Phone-Number-Check/backend/profanityAnalyzing"
@@ -19,8 +21,12 @@ import (
 	"github.com/Blanco0420/Phone-Number-Check/backend/providers/telnavi"
 	"github.com/Blanco0420/Phone-Number-Check/backend/utils"
 
+	"runtime"
+
 	backendapi "github.com/Blanco0420/Phone-Number-Check/backend/backendApi"
 	webcamdetection "github.com/Blanco0420/Phone-Number-Check/backend/webcamDetection"
+
+	_ "net/http/pprof"
 )
 
 func printFinalDisplayData(data providerdataprocessing.FinalDisplayData) {
@@ -47,23 +53,23 @@ func printFinalDisplayData(data providerdataprocessing.FinalDisplayData) {
 	fmt.Printf("Final Recent Abuse: %v\n", data.FinalRecentAbuse)
 }
 
-func buildFinalDisplayData(data map[string]providers.NumberDetails) (providerdataprocessing.FinalDisplayData, error) {
+func buildFinalDisplayData(data *map[string]providers.NumberDetails) (providerdataprocessing.FinalDisplayData, error) {
 	var businessNames, allSuffixes, lineTypes, industries, businessOverviews []string
 	var businessSources, lineTypeSources, industrySources, overviewSources []string
 	var fraudScores []int
 	var recentAbuseCount int
 	var abuseSeen int
 
-	for sourceName, details := range data {
-		if details.VitalInfo.Name != "" {
-			businessNames = append(businessNames, details.VitalInfo.Name)
+	for sourceName, details := range *data {
+		if details.VitalInfo.Name != nil {
+			businessNames = append(businessNames, *details.VitalInfo.Name)
 			businessSources = append(businessSources, sourceName)
 
 			suffixes := details.BusinessDetails.NameSuffixes
-			if len(suffixes) > 0 {
-				for _, suffix := range suffixes {
-					if !slices.Contains(suffixes, suffix) {
-						allSuffixes = append(suffixes, suffix)
+			if len(*suffixes) > 0 {
+				for _, suffix := range *suffixes {
+					if !slices.Contains(*suffixes, suffix) {
+						allSuffixes = append(*suffixes, suffix)
 					}
 				}
 			}
@@ -72,8 +78,8 @@ func buildFinalDisplayData(data map[string]providers.NumberDetails) (providerdat
 			lineTypes = append(lineTypes, string(details.VitalInfo.LineType))
 			lineTypeSources = append(lineTypeSources, sourceName)
 		}
-		if details.VitalInfo.Industry != "" {
-			industries = append(industries, details.VitalInfo.Industry)
+		if details.VitalInfo.Industry != nil {
+			industries = append(industries, *details.VitalInfo.Industry)
 			industrySources = append(industrySources, sourceName)
 		}
 		if details.VitalInfo.OverallFraudScore != 0 {
@@ -109,8 +115,8 @@ func buildFinalDisplayData(data map[string]providers.NumberDetails) (providerdat
 
 func callProviders(number string, data *map[string]providers.NumberDetails, sources map[string]providers.Source) error {
 	// Add a timeout context to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// defer cancel()
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -157,20 +163,15 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 			}()
 
 			// Wait for result or timeout
-			select {
-			case result := <-resultChan:
-				if result.err != nil {
-					fmt.Printf("[%s] error: %v\n", srcName, result.err)
-					return
-				}
-				mu.Lock()
-				(*data)[srcName] = result.data
-				mu.Unlock()
-				fmt.Printf("[%s] finished GetData and closed channel\n", srcName)
-			case <-ctx.Done():
-				fmt.Printf("[%s] timeout after 5 minutes\n", srcName)
+			result := <-resultChan
+			if result.err != nil {
+				fmt.Printf("[%s] error: %v\n", srcName, result.err)
 				return
 			}
+			mu.Lock()
+			(*data)[srcName] = result.data
+			mu.Unlock()
+			fmt.Printf("[%s] finished GetData and closed channel\n", srcName)
 		}(localSourceName, localSource)
 	}
 
@@ -219,41 +220,43 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 
 // }
 
-func roiMonitorLoop(cs *webcamdetection.CameraService, numberChan chan string, roiChan chan webcamdetection.RoiData) error {
-	for {
-		roi := <-roiChan
-		num, err := cs.MonitorCamera(roi)
-		if err != nil {
-			return err
-		}
-		numberChan <- num
-		break
-	}
-	return nil
+type Services struct {
+	CameraService  *webcamdetection.CameraService
+	RoiChan        chan webcamdetection.RoiData
+	Sources        map[string]providers.Source
+	DatabaseDriver *databasedriver.DatabaseDriver
 }
 
-func main() {
-	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+// initializeServices sets up all required services and providers
+func initializeServices() (*Services, error) {
 	logging.Info().Msg("Starting camera service")
 	cs, err := webcamdetection.NewCameraService(0)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	roiChan := make(chan webcamdetection.RoiData, 1)
-	numberChan := make(chan string)
+
 	go func() {
 		if err := backendapi.StartBackendApi(roiChan, cs); err != nil {
-			panic(err)
+			logging.Fatal().Err(err).Msg("Failed to start backend api service")
+			os.Exit(1)
 		}
 	}()
 
 	logging.Info().Msg("Loading environment file")
 	config.LoadEnv()
 
+	logging.Info().Msg("Initializing database")
+	databaseDriver, err := databasedriver.InitializeDriver()
+	if err != nil {
+		return nil, err
+	}
+
 	logging.Info().Msg("Initalizing profanity lists")
-	profanityAnalyzing.Initialize()
+	if err := profanityAnalyzing.Initialize(); err != nil {
+		logging.Fatal().Err(err).Msg("Failed to initialize profanity lists")
+		os.Exit(2)
+	}
 	// TODO: Send error here
 	// jpNumberProvider := jpnumber.Initialize(driver)
 
@@ -264,9 +267,10 @@ func main() {
 
 	jpNumber, err := jpnumber.Initialize()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	defer func() {
+	// Clean up jpNumber on panic
+	go func() {
 		if r := recover(); r != nil {
 			jpNumber.Close()
 			panic(r)
@@ -280,9 +284,9 @@ func main() {
 
 	telnavi, err := telnavi.Initialize()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	defer func() {
+	go func() {
 		if r := recover(); r != nil {
 			telnavi.Close()
 			panic(r)
@@ -296,34 +300,263 @@ func main() {
 		"telnavi": telnavi,
 	}
 
-	data := map[string]providers.NumberDetails{}
-	start := time.Now()
-	go roiMonitorLoop(cs, numberChan, roiChan)
-	var num string
+	return &Services{
+		CameraService:  cs,
+		RoiChan:        roiChan,
+		Sources:        sources,
+		DatabaseDriver: databaseDriver,
+	}, nil
+}
+
+// monitorAndParseNumber continuously monitors the ROI and returns a valid number
+// func monitorAndParseNumber(cs *webcamdetection.CameraService, roiChan chan webcamdetection.RoiData) (string, error) {
+// 	for {
+// 		roi := <-roiChan
+// 		numberChan := make(chan struct {
+// 			string
+// 			error
+// 		})
+// 		go func() {
+// 			for {
+
+// 				num, err := cs.MonitorCamera(roi)
+// 				if err != nil {
+// 					if strings.Contains(err.Error(), "phone number supplied is not a number") {
+// 						logging.Error().Err(err).Msgf("Failed to read phone number. Text: %s", num)
+// 						continue
+// 					} else {
+// 						logging.Error().Err(err).Msgf("Error monitoring camera")
+// 						continue // Try again
+// 					}
+// 				}
+// 				if num != "" && num != "<nil>" {
+// 					numberChan <- struct {
+// 						string
+// 						error
+// 					}{num, nil}
+// 				}
+// 			}
+// 		}()
+// 		select {
+// 		case res := <-numberChan:
+// 			return res.string, res.error
+// 		case <-time.After(6 * time.Second):
+// 			return "", fmt.Errorf("timed out reading number")
+// 		}
+// 	}
+// }
+
+type numberResult struct {
+	Number string
+	Err    error
+}
+
+func monitorAndParseNumber(cs *webcamdetection.CameraService, roiChan chan webcamdetection.RoiData) (string, error) {
 	for {
-		num = <-numberChan
-		if num != "" && num != "<nil>" {
-			break
+		roi, ok := <-roiChan
+		if !ok {
+			return "", fmt.Errorf("roiChan was closed")
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		defer cancel()
+
+		numberChan := make(chan numberResult, 1)
+
+		go func() {
+			num, err := cs.MonitorCamera(ctx, roi)
+			if err != nil {
+				logging.Error().Err(err).Msg("Error monitoring camera")
+				return
+			}
+			if num != "" {
+				numberChan <- numberResult{Number: num, Err: nil}
+			}
+		}()
+
+		select {
+		case res := <-numberChan:
+			return res.Number, res.Err
+		case <-ctx.Done():
+			return "", fmt.Errorf("timed out reading number")
 		}
 	}
+}
 
-	err = callProviders(num, &data, sources)
+func processNumber(num string, data *map[string]providers.NumberDetails, sources map[string]providers.Source) (fraudScore int, err error) {
+
+	if err = callProviders(num, data, sources); err != nil {
+		return 0, fmt.Errorf("callProviders failed: %w", err)
+	}
+
+	printData, err := buildFinalDisplayData(data)
+	if err != nil {
+		return 0, fmt.Errorf("failed to build display data: %w", err)
+	}
+
+	printFinalDisplayData(printData)
+	return printData.FinalFraudScore, nil
+}
+
+// processNumber calls providers, builds and prints results
+// func processNumber(num string, sources map[string]providers.Source) error {
+// 	data := map[string]providers.NumberDetails{}
+// 	err := callProviders(num, &data, sources)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	printData, err := buildFinalDisplayData(data)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	printFinalDisplayData(printData)
+// 	return nil
+// }
+
+// mainLoop orchestrates the monitoring and processing in a loop
+func mainLoop(services *Services) {
+	ctx := context.Background()
+	for {
+		logging.Info().Msg("Waiting for ROI selection and valid number...")
+
+		num, err := monitorAndParseNumber(services.CameraService, services.RoiChan)
+		if err != nil {
+			if strings.Contains(err.Error(), "timed out reading number") {
+				logging.Warn().Msg("Timed out waiting for a valid number, retrying...")
+			} else {
+				logging.Error().Err(err).Msg("Error in monitoring/parsing number")
+			}
+			continue
+		}
+
+		fmt.Println("Valid number detected:", num)
+
+		data := make(map[string]providers.NumberDetails)
+		start := time.Now()
+		finalFraudScore, err := processNumber(num, &data, services.Sources)
+		if err != nil {
+			logging.Error().Err(err).Msg("Error processing number")
+			continue
+		}
+		if err := services.DatabaseDriver.InsertNumberIntoDatabase(ctx, data, finalFraudScore); err != nil {
+			fmt.Println(err)
+		}
+
+		elapsed := time.Since(start)
+		logging.Info().Msgf("Finished. Time taken: %v", elapsed)
+	}
+}
+
+// Add resource monitoring
+func startResourceMonitor(interval time.Duration) {
+	go func() {
+		var m runtime.MemStats
+		for {
+			runtime.ReadMemStats(&m)
+			numGoroutine := runtime.NumGoroutine()
+			logging.Info().Msgf(
+				"MEM: Alloc = %v MiB, TotalAlloc = %v MiB, Sys = %v MiB, NumGC = %v, Goroutines = %v",
+				bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC, numGoroutine,
+			)
+			time.Sleep(interval)
+		}
+	}()
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
+func testingDatabase(driver *ent.Client) {
+	ctxSchema, cancelSchema := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelSchema()
+
+	exampleProvider, err := driver.Provider.Create().
+		SetName("Example provider").
+		Save(ctxSchema)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Got here")
-	printData, err := buildFinalDisplayData(data)
+	exampleBusiness, err := driver.Business.Create().
+		SetName("Example business name").
+		SetProvider(exampleProvider).
+		Save(ctxSchema)
 	if err != nil {
-		logging.Fatal().Err(err)
+		panic(err)
 	}
-	fmt.Println("Got here too")
-	printFinalDisplayData(printData)
-	elapsed := time.Since(start)
-	logging.Info().Msg(fmt.Sprintf("Finished. Time taken: %v", elapsed))
-	// cameraConfig := webcamdetection.StartCameraWithControls()
-	// jsonData, err := json.MarshalIndent(cameraConfig, "", "  ")
-	// if err != nil {
-	// 	panic(err)
+	_, err = driver.Address.Create().
+		SetCity("Example city").
+		SetPostcode("180-3021").
+		SetPrefecture("Example prefecture").
+		SetBusiness(exampleBusiness).
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+	_, err = driver.Comment.Create().
+		SetCommentText("Example comment text 1").
+		SetPostDate(time.Now()).
+		SetCommentFraudScore(67).
+		SetProvider(exampleProvider).
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+	_, err = driver.Comment.Create().
+		SetCommentText("Example comment text 2").
+		SetPostDate(time.Now()).
+		SetCommentFraudScore(32).
+		SetProvider(exampleProvider).
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+	exampleCarrier, err := driver.Carrier.Create().
+		SetName("Rakuten").
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+	exampleLineType, err := driver.LineType.Create().
+		SetLineType(providers.LineTypeMobile).
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+	exampleNumber, err := driver.Number.Create().
+		SetNumber("07091762683").
+		SetCarrier(exampleCarrier).
+		SetLinetype(exampleLineType).
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = driver.Caller.Create().
+		SetFraudScore(96).
+		SetIsFraud(true).
+		AddNumber(exampleNumber).
+		Save(ctxSchema)
+	if err != nil {
+		panic(err)
+	}
+
+}
+
+func main() {
+	// go func() {
+	// 	log.Println(http.ListenAndServe("localhost:6060", nil))
+	// }()
+	startResourceMonitor(10 * time.Second) // logs every 10 seconds
+	services, err := initializeServices()
+	if err != nil {
+		panic(err)
+	}
+	defer services.DatabaseDriver.Close()
+	// testingDatabase(services.DatabaseDriver)
+	mainLoop(services)
+	// parsedAddress := parser.ParseAddress("神奈川県横浜市西区高島2514リバース横浜403")
+	// for _, val := range parsedAddress {
+	// 	fmt.Println(val)
 	// }
-	// fmt.Println(string(jsonData))
 }

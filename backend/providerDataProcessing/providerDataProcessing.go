@@ -68,7 +68,7 @@ func EvaluateSource(input NumberRiskInput) int {
 	}
 
 	if len(input.Comments) > 0 {
-		commentScore := profanityAnalyzing.ScoreComments(input.Comments, 4)
+		commentScore := profanityAnalyzing.ScoreComments(input.Comments, 20)
 		score += int(math.Min(float64(commentScore)/20.0*30.0, 30))
 	}
 	if score > 100 {

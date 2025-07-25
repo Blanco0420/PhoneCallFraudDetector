@@ -1,11 +1,28 @@
-FROM gocv/opencv:latest AS base
 
 # === Update and install dependencies ===
+FROM gocv/opencv:latest AS base
 
 RUN apt-get update 
 
 RUN apt-get install -y \
-  software-properties-common
+  software-properties-common \
+  git
+
+
+
+# === Install libpostal ===
+WORKDIR /tmp
+
+
+RUN git clone https://github.com/openvenues/libpostal libpostal-building && \
+  cd libpostal-building && \
+  ./bootstrap.sh && \
+  mkdir /data && \
+  ./configure  && \
+  make && \
+  make install && \
+  ldconfig
+
 
 # === Install Tesseract ===
 
@@ -43,10 +60,10 @@ EXPOSE 8080
 FROM base AS dev
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 RUN go install github.com/air-verse/air@latest
-# RUN go build -gcflags="all=-N -l" -o proxy
+
 
 EXPOSE 40000
-CMD [ "air" ]
+CMD [ "air", "-c", ".air.toml" ]
 
 # === === PROD === ===
 FROM base AS prod

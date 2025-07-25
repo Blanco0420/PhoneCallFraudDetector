@@ -2,6 +2,7 @@ package profanityAnalyzing
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ const (
 	LDNOOBWFileName = "LDNOOBW-bad.txt"
 	LDNOOBWRawUrl   = "https://raw.githubusercontent.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/refs/heads/master/ja"
 )
+
+var badWords map[string]struct{}
 
 func Initialize() error {
 	if exists := utils.CheckIfFileExists(LDNOOBWFileName); !exists {
@@ -57,6 +60,14 @@ func Initialize() error {
 
 func scoreComment(comment string) int {
 	score := 0
+
+	// Tokenize and classify hits
+	greenHits, yellowHits, redHits := checkCommentForHits(comment)
+	score += len(greenHits) * 1
+	score += len(yellowHits) * 3
+	score += len(redHits) * 6
+
+	// Also score based on exact match or fuzzy match with bad words
 	for word := range badWords {
 		if strings.Contains(comment, word) {
 			score += 2
@@ -64,22 +75,23 @@ func scoreComment(comment string) int {
 			score += 1
 		}
 	}
+
 	return score
 }
 
-// TODO: Maybe remove concurrency as paramater and make an env var
 func ScoreComments(comments []providers.Comment, concurrency int) int {
 	in := make(chan int, len(comments))
 	out := make(chan int, len(comments))
 
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
-	//TODO: Add the comment score to final data for ml use
+
 	for range concurrency {
 		go func() {
 			defer wg.Done()
-			for comment := range in {
-				score := scoreComment(comments[comment].Text)
+			for commentIndex := range in {
+				text := comments[commentIndex].Text
+				score := scoreComment(text)
 				out <- score
 			}
 		}()
@@ -101,5 +113,7 @@ func ScoreComments(comments []providers.Comment, concurrency int) int {
 	for s := range out {
 		total += s
 	}
-	return total
+
+	// Cap score to 20 max
+	return int(math.Min(float64(total), 20))
 }

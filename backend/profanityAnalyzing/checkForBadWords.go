@@ -54,6 +54,7 @@ var yellowLevel = map[string]struct{}{
 }
 
 var redLevel = map[string]struct{}{
+	"詐欺":            {},
 	"着信拒否しても":       {},
 	"無差別電話営業":       {},
 	"ストーカー的":        {},

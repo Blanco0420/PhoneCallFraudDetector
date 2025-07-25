@@ -1,10 +1,10 @@
 const japa = require('jp-address-parser');
 
 
-(async () => {
+const processAddress = async (address) =>{
   try {
     const address = process.argv[2];
-    var result = { success: true }
+    var result = { }
     result = { ...result, data: await japa.parse(address) }
     console.log(JSON.stringify(result))
   }
@@ -22,5 +22,9 @@ const japa = require('jp-address-parser');
   */
   // console.log(await japa.normalize('京都府京都市東山区本町22-489-1'))
   // 京都府京都市東山区本町二十二丁目４８９番１号
-})()
+}
 
+
+  // const address = process.argv[2];
+  const address = "神奈川県横浜市西区高島2514リバース横浜403"
+  processAddress(address)

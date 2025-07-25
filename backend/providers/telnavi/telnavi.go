@@ -1,12 +1,10 @@
 package telnavi
 
 import (
-	"context"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	japaneseinfo "github.com/Blanco0420/Phone-Number-Check/backend/japaneseInfo"
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
@@ -71,7 +69,7 @@ func (t *TelnaviSource) calculateFraudScore(ratingTableContainer selenium.WebEle
 		if err != nil {
 			panic(fmt.Errorf("csould not get the inner text of fraud score? : %v", err))
 		}
-		matches := percentageRegex.FindStringSubmatch(rawString)
+		matches := percentageRegex.FindStringSubmatch(*rawString)
 		if len(matches) < 2 {
 			panic(fmt.Errorf("matches len is < 0 : %v", matches))
 		} else if len(matches) > 2 {
@@ -118,18 +116,21 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 		switch key {
 		case "事業者名":
 			// if t.currentVitalInfo.Name == "" {
-			if data.VitalInfo.Name == "" {
+			if data.VitalInfo.Name == nil {
 				cleanName, suffixes := extractBusinessName(&val)
 
-				data.BusinessDetails.NameSuffixes = suffixes
+				*data.BusinessDetails.NameSuffixes = suffixes
 				// t.currentVitalInfo.Name = cleanName
 				// t.vitalInfoChannel <- *t.currentVitalInfo
-				data.VitalInfo.Name = cleanName
+				*data.VitalInfo.Name = cleanName
 			}
 		case "住所":
 			if data.BusinessDetails.LocationDetails == (providers.LocationDetails{}) {
 				if err := japaneseinfo.GetAddressInfo(val, &data.BusinessDetails.LocationDetails); err != nil {
-					return err
+					data.BusinessDetails.LocationDetails = providers.LocationDetails{
+						Prefecture: nil,
+					}
+					continue
 				}
 			}
 		case "回線種別":
@@ -144,7 +145,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 		case "業種タグ":
 			// t.currentVitalInfo.Industry = val
 			// t.vitalInfoChannel <- *t.currentVitalInfo
-			data.VitalInfo.Industry = val
+			*data.VitalInfo.Industry = val
 		case "ユーザー評価":
 			rating, err := getCleanRating(val)
 			if err != nil {
@@ -197,13 +198,13 @@ func (t *TelnaviSource) getBusinessInfo(data *providers.NumberDetails, businessT
 		switch key {
 		case "事業者名":
 			cleanedName, suffixes := extractBusinessName(&val)
-			data.BusinessDetails.NameSuffixes = suffixes
+			*data.BusinessDetails.NameSuffixes = suffixes
 			// t.currentVitalInfo.Name = cleanedName
 			// t.vitalInfoChannel <- *t.currentVitalInfo
-			data.VitalInfo.Name = cleanedName
+			*data.VitalInfo.Name = cleanedName
 		case "住所":
 			if err := japaneseinfo.GetAddressInfo(val, &data.BusinessDetails.LocationDetails); err != nil {
-				return err
+				continue
 			}
 		}
 	}
@@ -228,108 +229,49 @@ func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, er
 	phoneNumberInfoPageUrl := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)
 	fmt.Printf("[telnavi] Navigating to: %s\n", phoneNumberInfoPageUrl)
 
-	// Add timeout for page loading
-	pageCtx, pageCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer pageCancel()
-
-	pageChan := make(chan error, 1)
-	go func() {
-		t.driver.GotoUrl(phoneNumberInfoPageUrl)
-		t.driver.LoadCookies(webdriver.TelnaviWebScrapingProvider)
-		pageChan <- nil
-	}()
-
-	select {
-	case err := <-pageChan:
-		if err != nil {
-			return providers.NumberDetails{}, fmt.Errorf("failed to load page: %v", err)
-		}
-	case <-pageCtx.Done():
-		fmt.Printf("[telnavi] Timeout loading page, continuing anyway...\n")
-	}
+	t.driver.GotoUrl(phoneNumberInfoPageUrl)
+	t.driver.LoadCookies(webdriver.TelnaviWebScrapingProvider)
 
 	fmt.Printf("[telnavi] Loaded page and cookies\n")
-
-	// Add timeout for business table processing
-	businessCtx, businessCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer businessCancel()
-
-	businessChan := make(chan error, 1)
-	go func() {
-		businessTableContainer, err := t.driver.FindElement("div.info_table:nth-child(1) > table > tbody:nth-child(1)")
-		if err != nil {
-			if strings.Contains(err.Error(), "no such element") {
-				fmt.Printf("[telnavi] No business table found, continuing...\n")
-				businessChan <- nil
-				return
-			} else {
-				businessChan <- err
-				return
-			}
+	// FIXME: Hung here \/\/\/\/
+	businessTableContainer, err := t.driver.FindElement("div.info_table:nth-child(1) > table > tbody:nth-child(1)")
+	if err != nil {
+		if strings.Contains(err.Error(), "no such element") {
+			fmt.Printf("[telnavi] No business table found, continuing...\n")
 		} else {
-			fmt.Printf("[telnavi] Found business table, processing...\n")
-			businessTableEntries, err := webdriver.GetTableInformation(t.driver, businessTableContainer, "th", "td")
-			if err != nil {
-				businessChan <- err
-				return
-			}
-			if err := t.getBusinessInfo(&data, businessTableEntries); err != nil {
-				businessChan <- err
-				return
-			}
-			fmt.Printf("[telnavi] Business info processed\n")
-			businessChan <- nil
+			return data, err
 		}
-	}()
-
-	select {
-	case err := <-businessChan:
+	} else {
+		fmt.Printf("[telnavi] Found business table, processing...\n")
+		businessTableEntries, err := webdriver.GetTableInformation(t.driver, businessTableContainer, "th", "td")
 		if err != nil {
-			return providers.NumberDetails{}, err
+			return data, err
 		}
-	case <-businessCtx.Done():
-		fmt.Printf("[telnavi] Timeout processing business info, skipping...\n")
+		if err := t.getBusinessInfo(&data, businessTableEntries); err != nil {
+			return data, err
+		}
+		fmt.Printf("[telnavi] Business info processed\n")
 	}
 
 	fmt.Printf("[telnavi] Looking for phone number table...\n")
 
-	// Add timeout for phone number table processing
-	phoneCtx, phoneCancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer phoneCancel()
-
-	phoneChan := make(chan error, 1)
-	go func() {
-		phoneNumberTableContainer, err := t.driver.FindElement("div.info_table:nth-child(2) > table > tbody")
-		if err != nil {
-			phoneChan <- err
-			return
-		}
-
+	phoneNumberTableContainer, err := t.driver.FindElement("div.info_table:nth-child(2) > table > tbody")
+	if err == nil {
 		phoneNumberTableEntries, err := webdriver.GetTableInformation(t.driver, phoneNumberTableContainer, "th", "td")
 		if err != nil {
-			phoneChan <- err
-			return
+			return data, err
 		}
 		if err := t.getPhoneNumberInfo(&data, phoneNumberTableEntries); err != nil {
-			phoneChan <- err
-			return
+			return data, err
 		}
 		fmt.Printf("[telnavi] Phone number info processed\n")
-		phoneChan <- nil
-	}()
-
-	select {
-	case err := <-phoneChan:
-		if err != nil {
-			return providers.NumberDetails{}, err
-		}
-	case <-phoneCtx.Done():
-		fmt.Printf("[telnavi] Timeout processing phone number info, skipping...\n")
+	} else {
+		fmt.Printf("[telnavi] Could not find phone number table: %v\n", err)
 	}
 
-	// Skip comment processing entirely to avoid hanging on heavy JavaScript
-	fmt.Printf("[telnavi] Skipping comment processing to avoid hanging on JavaScript\n")
-	data.SiteInfo.ReviewCount = 0
+	comments, reviewCount := extractAllComments(t.driver, phoneNumberInfoPageUrl)
+	data.SiteInfo.ReviewCount = reviewCount
+	data.SiteInfo.Comments = comments
 
 	fmt.Printf("[telnavi] Getting graph data...\n")
 	var graphData []providers.GraphData
@@ -354,4 +296,115 @@ func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, er
 	data.VitalInfo.OverallFraudScore = overallFraudScore
 	fmt.Printf("[telnavi] Finished GetData successfully\n")
 	return data, nil
+}
+
+// extractAllComments extracts all comments for the given phone number page(s) using BatchExtractComments.
+func extractAllComments(driver *webdriver.WebDriverWrapper, phoneNumberInfoPageUrl string) ([]providers.Comment, int) {
+	var allComments []providers.Comment
+	reviewCount := 0
+	processedPages := map[int]bool{}
+
+	// Always start on the first page
+	driver.GotoUrl(phoneNumberInfoPageUrl)
+	driver.LoadCookies(webdriver.TelnaviWebScrapingProvider)
+
+	userCommentsContainer, err := driver.FindElement("div.kuchikomi_thread_content")
+	if err != nil {
+		logging.Warn().Err(err).Msg("Failed to find user comments container")
+		return nil, 0
+	}
+
+	// Always try to extract comments from the current page (page 1)
+	batchComments, err := webdriver.BatchExtractComments(
+		driver,
+		userCommentsContainer,
+		"#thread",
+		"tbody tr:nth-child(1) > td:nth-child(1) > time:nth-child(1)",
+		"tbody tr:nth-child(2) > td > div",
+	)
+	if err != nil {
+		logging.Warn().Err(err).Msg("Failed to extract comments on page 1")
+	} else {
+		reviewCount += len(batchComments)
+		for _, entry := range batchComments {
+			parsedDate, err := utils.ParseDate("2006年1月2日 15時4分", entry["date"])
+			if err != nil {
+				logging.Warn().Err(err).Msg("Failed to parse comment date")
+				continue
+			}
+			comment := providers.Comment{
+				Text:     entry["text"],
+				PostDate: parsedDate,
+			}
+			allComments = append(allComments, comment)
+		}
+	}
+	processedPages[1] = true
+
+	// Now check for pagination
+	paginationControlElement, err := userCommentsContainer.FindElement(selenium.ByCSSSelector, "div.paginationControl")
+	pages := []int{}
+	if err == nil {
+		spans, err := paginationControlElement.FindElements(selenium.ByTagName, "span")
+		if err != nil {
+			logging.Warn().Err(err).Msg("Failed to find span elements in pagination")
+		} else if len(spans) < 2 {
+			links, err := paginationControlElement.FindElements(selenium.ByTagName, "a")
+			if err != nil {
+				logging.Warn().Err(err).Msg("Failed to find link elements in pagination")
+			} else {
+				for _, elem := range links {
+					rawPageNumber, err := elem.Text()
+					if err != nil {
+						logging.Warn().Err(err).Msg("Couldn't get page number text")
+						continue
+					}
+					parsedPageNumber, err := strconv.Atoi(rawPageNumber)
+					if err != nil {
+						continue
+					}
+					if !processedPages[parsedPageNumber] {
+						pages = append(pages, parsedPageNumber)
+					}
+				}
+			}
+		}
+	}
+
+	// Process each additional page
+	for _, pageNumber := range pages {
+		driver.GotoUrl(fmt.Sprintf("%s?page=%d", phoneNumberInfoPageUrl, pageNumber))
+		driver.LoadCookies(webdriver.TelnaviWebScrapingProvider)
+		userCommentsContainer, err := driver.FindElement("div.kuchikomi_thread_content")
+		if err != nil {
+			logging.Warn().Err(err).Msg("Failed to find user comments container on page")
+			continue
+		}
+		batchComments, err := webdriver.BatchExtractComments(
+			driver,
+			userCommentsContainer,
+			"#thread",
+			"tbody tr:nth-child(1) > td:nth-child(1) > time:nth-child(1)",
+			"tbody tr:nth-child(2) > td > div",
+		)
+		if err != nil {
+			logging.Warn().Err(err).Msgf("Failed to extract comments on page %d", pageNumber)
+			continue
+		}
+		reviewCount += len(batchComments)
+		for _, entry := range batchComments {
+			parsedDate, err := utils.ParseDate("2006年1月2日 15時4分", entry["date"])
+			if err != nil {
+				logging.Warn().Err(err).Msg("Failed to parse comment date")
+				continue
+			}
+			comment := providers.Comment{
+				Text:     entry["text"],
+				PostDate: parsedDate,
+			}
+			allComments = append(allComments, comment)
+		}
+		processedPages[pageNumber] = true
+	}
+	return allComments, reviewCount
 }

@@ -3,26 +3,52 @@ services:
     build:
       context: ./backend
       target: ${NUMBER__APP_ENV:-prod}
-    image: number-backend:latest
+    image: number-backend
     container_name: number-backend
     volumes:
-      # - /home/blanco/Pictures/phone pictures/WIN_20250630_16_05_20_Pro.jpg
+      - /tmp/.X11-unix/:/tmp/.X11-unix/:rw
       - ./backend:/app
+    environment:
+      - PHRAUD__DB_PASS=password
     networks:
       - number
     ports:
       # Dev port
       - 40000:40000
-    # develop:
-    #   watch:
-    #     - path: ./backend
-    #       target: /app
-    #       action: sync
+    shm_size: '2g'
+    devices:
+      - /dev/video0:/dev/video0 # CHANGE FIRST /DEV/VIDEOX TO CORRECT DEVICE
+      # develop:
+      #   watch:
+      #     - path: ./backend
+      #       target: /app
+      #       action: sync
+  phraud-database:
+    image: 'postgres:latest'
+
+    # By default, a Postgres database is running on the 5432 port.
+    # If we want to access the database from our computer (outside the container),
+    # we must share the port with our computer's port.
+    # The syntax is [port we want on our machine]:[port we want to retrieve in the container]
+    # Note: You are free to change your computer's port,
+    # but take into consideration that it will change the way
+    # you are connecting to your database.
+    volumes:
+      - Phraud-Database:/var/lib/postgresql/data:rw
+    ports:
+      - 5432:5432
+    networks:
+      - number
+    environment:
+      POSTGRES_USER: postgres # The PostgreSQL user (useful to connect to the database)
+      POSTGRES_PASSWORD: password # The PostgreSQL password (useful to connect to the database)
+      POSTGRES_DB: Phraud # The PostgreSQL default database (automatically created at first launch)
+
   number-frontend:
     build:
       context: ./frontend
       target: ${NUMBER__APP_ENV:-prod}
-    image: number-frontend:latest
+    image: number-frontend
     container_name: number-frontend
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -40,3 +66,8 @@ services:
 
 networks:
   number:
+
+
+volumes:
+  Phraud-Database:
+

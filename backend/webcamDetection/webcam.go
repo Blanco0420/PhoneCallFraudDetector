@@ -2,13 +2,17 @@ package webcamdetection
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/png"
 	"math"
 	"os"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
 	"github.com/nyaruka/phonenumbers"
 	"gocv.io/x/gocv"
 )
@@ -44,8 +48,7 @@ func (cs *CameraService) GetFrame() (gocv.Mat, error) {
 	if cs.webcam == nil || !cs.webcam.IsOpened() {
 		return img, fmt.Errorf("Camera could not be found")
 	}
-	if ok := cs.webcam.Read(&img); !ok || img.Empty() {
-		img.Close()
+	if !cs.webcam.Read(&img) || img.Empty() {
 		return img, os.ErrInvalid
 	}
 	return img, nil
@@ -65,58 +68,75 @@ func matToBytes(mat gocv.Mat) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (cs *CameraService) MonitorCamera(roi RoiData) (string, error) {
-	var num string
-	// cameraOutput := gocv.NewMat()
-	// if ok := cs.webcam.Read(&cameraOutput); !ok || cameraOutput.Empty() {
-	// 	return text, fmt.Errorf("error getting frame from camera")
-	// }
+func (cs *CameraService) MonitorCamera(ctx context.Context, roi RoiData) (string, error) {
+	attempts := 30 // e.g., try for up to 30 frames (~3 seconds at 100ms)
+	var text string
 
-	cameraOutput := gocv.IMRead("/home/blanco/Pictures/phone pictures/WIN_20250630_16_05_20_Pro.jpg", gocv.IMReadColor)
-	bounds := cameraOutput.Size()
+	for i := 0; i < attempts; i++ {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+			// Read frame
+			cameraOutput := gocv.NewMat()
+			if ok := cs.webcam.Read(&cameraOutput); !ok || cameraOutput.Empty() {
+				cameraOutput.Close()
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
 
-	x := int(math.Max(0, float64(roi.X)))
-	y := int(math.Max(0, float64(roi.Y)))
-	w := int(math.Min(float64(roi.Width), float64(bounds[1]-x)))
-	h := int(math.Min(float64(roi.Height), float64(bounds[0]-y)))
+			bounds := cameraOutput.Size()
+			x := int(math.Max(0, float64(roi.X)))
+			y := int(math.Max(0, float64(roi.Y)))
+			w := int(math.Min(float64(roi.Width), float64(bounds[1]-x)))
+			h := int(math.Min(float64(roi.Height), float64(bounds[0]-y)))
 
-	if w <= 0 || h <= 0 {
-		return num, fmt.Errorf("invalid ROI: width/height zero or negative after clamping")
-	}
+			if w <= 0 || h <= 0 {
+				cameraOutput.Close()
+				return "", fmt.Errorf("invalid ROI: width/height zero or negative after clamping")
+			}
 
-	rect := image.Rect(
-		x,
-		y,
-		x+w,
-		y+h,
-	)
-	croppedInput := cameraOutput.Region(rect)
-	defer croppedInput.Close()
-	outputImage, err := processImage(croppedInput)
-	if err != nil {
-		return num, err
-	}
-	bytes, err := matToBytes(outputImage)
-	if err != nil {
-		return num, err
-	}
-	for {
-		text, err := ProcessText(bytes)
-		if err != nil {
-			return num, err
+			rect := image.Rect(x, y, x+w, y+h)
+			croppedInput := cameraOutput.Region(rect)
+			cameraOutput.Close()
+			defer croppedInput.Close()
+
+			outputImage, err := processImage(croppedInput)
+			if err != nil {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			bytes, err := matToBytes(outputImage)
+			if err != nil {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			text, err = ProcessText(bytes)
+			if err != nil {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			onlyNumbersReg := regexp.MustCompile(`[^\d+]`)
+			text = onlyNumbersReg.ReplaceAllString(text, "")
+
+			parsedNumber, err := phonenumbers.Parse(text, "JP")
+			if err != nil {
+				continue
+			}
+			if phonenumbers.IsValidNumber(parsedNumber) {
+				logging.Info().Msg("Valid number detected")
+				return text, nil
+			} else {
+				logging.Info().Msg("Invalid number")
+			}
+
+			time.Sleep(100 * time.Millisecond)
 		}
-		parsedNumber, err := phonenumbers.Parse(text, "JP")
-		if err != nil {
-			return num, err
-		}
-		if phonenumbers.IsValidNumber(parsedNumber) {
-			num = text
-			return num, nil
-		}
-		// num, err =
-		break
 	}
-	return num, nil
+
+	return "", fmt.Errorf("no valid number detected after %d attempts", attempts)
 }
 func processImage(inputImage gocv.Mat) (gocv.Mat, error) {
 	gray := gocv.NewMat()
@@ -156,10 +176,6 @@ func processImage(inputImage gocv.Mat) (gocv.Mat, error) {
 		return gocv.NewMat(), err
 	}
 
-	win := gocv.NewWindow("test")
-	win.IMShow(newBlurred)
-	win.WaitKey(0)
-	win.Close()
 	result := newBlurred.Clone()
 	return result, nil
 }

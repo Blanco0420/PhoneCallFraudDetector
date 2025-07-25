@@ -1,0 +1,11 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+full_bin = "dlv --listen=:40000 --headless --api-version=2 --accept-multiclient exec tmp/debug"
+cmd = "go build -gcflags='all=-N -l' -o tmp/debug"
+bin = "tmp/debug"
+delay = 1000
+
+[run]
+cmd = "dlv --listen=:40000 --headless --api-version=2 --accept-multiclient exec tmp/debug"

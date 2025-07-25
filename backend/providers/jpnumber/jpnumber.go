@@ -1,7 +1,6 @@
 package jpnumber
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -122,36 +121,26 @@ func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
 	if err != nil {
 		return []providers.Comment{}, err
 	}
-	commentElements, err := commentsContainer.FindElements(selenium.ByCSSSelector, "div.frame-728-gray-l")
-	commentElements = commentElements[:len(commentElements)-1]
+	batchComments, err := webdriver.BatchExtractComments(
+		s.driver,
+		commentsContainer,
+		"div.frame-728-gray-l",
+		".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)",
+		"div:nth-child(2) > dt:nth-child(1)",
+	)
 	if err != nil {
 		return []providers.Comment{}, err
 	}
-
-	for _, elem := range commentElements {
-		dateElement, err := elem.FindElement(selenium.ByCSSSelector, commentDateSelector)
-
+	for _, entry := range batchComments {
+		parsedDate, err := utils.ParseDate("2006/01/02 15:04:05", entry["date"])
 		if err != nil {
-			elem, err := json.MarshalIndent(dateElement, "", "  ")
-			fmt.Println(string(elem))
-			return []providers.Comment{}, fmt.Errorf("error getting date Element: %v", err)
+			continue
 		}
-		commentText, err := s.driver.GetInnerText(elem, "div:nth-child(2) > dt:nth-child(1)")
-		if err != nil {
-			return []providers.Comment{}, fmt.Errorf("comment text error!\n%v", err)
+		comment := providers.Comment{
+			Text:     entry["text"],
+			PostDate: parsedDate,
 		}
-		dateText, err := s.driver.GetInnerText(elem, ".title-background-pink table tbody tr td:nth-child(2) table  tbody tr td:nth-child(1)")
-		if err != nil {
-			return []providers.Comment{}, fmt.Errorf("comment date error!\n%v", err)
-		}
-
-		parsedDate, err := utils.ParseDate("2006/01/02 15:04:05", dateText)
-		if err != nil {
-			return []providers.Comment{}, fmt.Errorf("parsing date error:\n%v", err)
-		}
-
-		comments = append(comments, providers.Comment{Text: commentText, PostDate: parsedDate})
-
+		comments = append(comments, comment)
 	}
 	return comments, nil
 }
@@ -199,22 +188,22 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, business
 			switch key {
 			case "Name", "事業者名称":
 				cleanName, suffixes := utils.GetSuffixesFromCompanyName(&value)
-				data.BusinessDetails.NameSuffixes = suffixes
-				data.VitalInfo.Name = cleanName
+				*data.BusinessDetails.NameSuffixes = suffixes
+				*data.VitalInfo.Name = cleanName
 				// s.currentVitalInfo.Name = cleanName
 				// s.vitalInfoChannel <- *s.currentVitalInfo
 			case "Industry", "業種":
 				// s.currentVitalInfo.Industry = value
 				// s.vitalInfoChannel <- *s.currentVitalInfo
-				data.VitalInfo.Industry = value
+				*data.VitalInfo.Industry = value
 			case "Address", "住所":
 				japaneseinfo.GetAddressInfo(value, &businessDetails.LocationDetails)
 			case "Official website", "公式サイト":
-				businessDetails.Website = value
+				*businessDetails.Website = value
 			case "Business", "事業紹介":
 				// s.currentVitalInfo.CompanyOverview = value
 				// s.vitalInfoChannel <- *s.currentVitalInfo
-				data.VitalInfo.CompanyOverview = value
+				*data.VitalInfo.CompanyOverview = value
 			}
 		}
 	}
@@ -249,7 +238,7 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	if err != nil {
 		return data, err
 	}
-	rawLineType := strings.ReplaceAll(strings.Split(text, ">")[0], " ", "")
+	rawLineType := strings.ReplaceAll(strings.Split(*text, ">")[0], " ", "")
 	lineType, err := utils.GetLineType(rawLineType)
 	if err != nil {
 		return data, err
@@ -279,17 +268,17 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 		return data, err
 	}
 	prefecture, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(4)>td:nth-child(2)")
-	data.BusinessDetails.LocationDetails.Prefecture = prefecture
+	*data.BusinessDetails.LocationDetails.Prefecture = *prefecture
 
 	carrier, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(3)>td:nth-child(4)")
-	data.Carrier = carrier
+	*data.Carrier = *carrier
 
 	reviewCount, err := s.driver.GetInnerText(phoneNumberInfoContainer, "span.red")
 	if err != nil {
 		return data, err
 	}
-	if reviewCount != "" {
-		i, err := strconv.Atoi(reviewCount)
+	if reviewCount != nil {
+		i, err := strconv.Atoi(*reviewCount)
 		if err != nil {
 			return data, err
 		}

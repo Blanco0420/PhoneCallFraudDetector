@@ -2,7 +2,6 @@ package webdriver
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -22,8 +21,7 @@ func InitializeDriver(providerName WebScrapingProvider) (*WebDriverWrapper, erro
 	if err != nil {
 		return &WebDriverWrapper{}, err
 	}
-	opts := selenium.ServiceOption(selenium.Output(os.Stderr))
-	service, err := selenium.NewGeckoDriverService("geckodriver", port, opts)
+	service, err := selenium.NewGeckoDriverService("geckodriver", port)
 	if err != nil {
 		return &WebDriverWrapper{}, fmt.Errorf("error starting geckodriver service: %v", err)
 	}
@@ -38,7 +36,7 @@ func InitializeDriver(providerName WebScrapingProvider) (*WebDriverWrapper, erro
 	}
 	firefoxCaps := firefox.Capabilities{
 		Args: []string{
-			// "--headless",
+			"--headless",
 			"--profile", profilePath,
 		},
 		Prefs: map[string]any{
@@ -126,16 +124,16 @@ func (w *WebDriverWrapper) CheckElementExists(selector string) bool {
 	return err == nil
 }
 
-func (w *WebDriverWrapper) GetInnerText(containerElement selenium.WebElement, selector string) (string, error) {
+func (w *WebDriverWrapper) GetInnerText(containerElement selenium.WebElement, selector string) (*string, error) {
 	elem, err := containerElement.FindElement(selenium.ByCSSSelector, selector)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	text, err := elem.Text()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return text, nil
+	return &text, nil
 }
 
 func (w *WebDriverWrapper) ExecuteScript(script string) (any, error) {

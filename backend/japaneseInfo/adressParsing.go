@@ -70,10 +70,10 @@ func GetAddressInfo(address string, locationDetails *providers.LocationDetails) 
 		if err != nil {
 			return err
 		}
-		locationDetails.Prefecture = addressInfo.Prefecture
-		locationDetails.City = addressInfo.City
+		*locationDetails.Prefecture = addressInfo.Prefecture
+		*locationDetails.City = addressInfo.City
 		//TODO: Also parse and send back here
-		locationDetails.Address = address
+		*locationDetails.Address = address
 
 	} else {
 
@@ -82,9 +82,9 @@ func GetAddressInfo(address string, locationDetails *providers.LocationDetails) 
 			return err
 		}
 		fmt.Printf("Address: %v", addressInfo)
-		locationDetails.Prefecture = addressInfo.prefecture
-		locationDetails.City = addressInfo.city
-		locationDetails.Address = address
+		*locationDetails.Prefecture = addressInfo.prefecture
+		*locationDetails.City = addressInfo.city
+		*locationDetails.Address = address
 	}
 	return nil
 }

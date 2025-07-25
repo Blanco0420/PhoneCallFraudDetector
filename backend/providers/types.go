@@ -31,30 +31,31 @@ type SiteInfo struct {
 }
 
 type LocationDetails struct {
-	Prefecture string
-	City       string
-	Address    string
-	PostCode   string
+	Prefecture *string
+	City       *string
+	Address    *string
+	PostCode   *string
 }
 
 type BusinessDetails struct {
-	Website         string
+	Website         *string
 	LocationDetails LocationDetails
-	NameSuffixes    []string
+	NameSuffixes    *[]string
 }
 
 type VitalInfo struct {
-	Name              string
-	Industry          string
-	CompanyOverview   string
+	Name              *string
+	Industry          *string
+	CompanyOverview   *string
 	LineType          LineType
 	OverallFraudScore int
 	FraudulentDetails FraudulentDetails
 }
 
 type NumberDetails struct {
-	Number          string
-	Carrier         string
+	Number string
+	//TODO: Change to enum? (like LineType)
+	Carrier         *string
 	VitalInfo       VitalInfo
 	BusinessDetails BusinessDetails
 	SiteInfo        SiteInfo
@@ -75,6 +76,17 @@ const (
 	LineTypeUnknown  LineType = "unknown"
 	LineTypeOther    LineType = "other"
 )
+
+func (LineType) Values() []string {
+	return []string{
+		string(LineTypeMobile),
+		string(LineTypeTollFree),
+		string(LineTypeLandline),
+		string(LineTypeVOIP),
+		string(LineTypeUnknown),
+		string(LineTypeOther),
+	}
+}
 
 type APIConfig struct {
 	APIKey     string

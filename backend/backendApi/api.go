@@ -3,9 +3,7 @@ package backendapi
 import (
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
 	webcamdetection "github.com/Blanco0420/Phone-Number-Check/backend/webcamDetection"
@@ -17,19 +15,14 @@ func setupRoutes(ROIChannel chan webcamdetection.RoiData, webcam *webcamdetectio
 
 	r := gin.Default()
 	r.GET("/getCurrentImage", func(ctx *gin.Context) {
-		imgPath := "/home/blanco/Pictures/phone pictures/WIN_20250630_16_05_20_Pro.jpg"
-		if info, err := os.Stat(imgPath); err != nil {
-			fmt.Println(info)
-			fmt.Println("ERROR: ", err)
+		img, err := webcam.GetFrame()
+		if err != nil {
+			ctx.JSON(500, err)
 		}
-		img := gocv.IMRead("/home/blanco/Pictures/phone pictures/WIN_20250630_16_05_20_Pro.jpg", gocv.IMReadColor)
-		// img, err := webcam.GetFrame()
-		// if err != nil {
-		// 	ctx.JSON(500, err)
-		// }
+		defer img.Close()
 		if img.Empty() {
-			err := errors.New("Could not read image")
-			logging.Error().Err(err)
+			err := errors.New("could not read image")
+			logging.Error().Err(err).Msg("Error getting frame")
 			ctx.JSON(http.StatusNotFound, gin.H{"message": err.Error(), "error": err})
 			return
 		}
