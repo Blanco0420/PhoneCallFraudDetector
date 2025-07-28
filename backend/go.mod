@@ -40,6 +40,7 @@ require (
 	github.com/golang/protobuf v1.5.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/hcl/v2 v2.13.0 // indirect
 	github.com/ikawaha/kagome-dict v1.1.6 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

@@ -2,27 +2,29 @@ services:
   number-backend:
     build:
       context: ./backend
-      target: ${NUMBER__APP_ENV:-prod}
-    image: number-backend
+      target: ${PHRAUD__APP_ENV:-prod}
+    image: number-backend:1.0.0
     container_name: number-backend
     volumes:
       - /tmp/.X11-unix/:/tmp/.X11-unix/:rw
       - ./backend:/app
+      - /home/blanco/Pictures/phone pictures/WIN_20250630_16_05_20_Pro.jpg:/tmp/Phraud_Example_Image.jpg:ro
     environment:
       - PHRAUD__DB_PASS=password
+      - PHRAUD__APP_ENV=dev
     networks:
       - number
     ports:
       # Dev port
       - 40000:40000
     shm_size: '2g'
-    devices:
-      - /dev/video0:/dev/video0 # CHANGE FIRST /DEV/VIDEOX TO CORRECT DEVICE
-      # develop:
-      #   watch:
-      #     - path: ./backend
-      #       target: /app
-      #       action: sync
+    # devices:
+    #   - /dev/video0:/dev/video0 # CHANGE FIRST /DEV/VIDEOX TO CORRECT DEVICE
+    # develop:
+    #   watch:
+    #     - path: ./backend
+    #       target: /app
+    #       action: sync
   phraud-database:
     image: 'postgres:latest'
 
@@ -47,9 +49,11 @@ services:
   number-frontend:
     build:
       context: ./frontend
-      target: ${NUMBER__APP_ENV:-prod}
-    image: number-frontend
+      target: ${PHRAUD__APP_ENV:-prod}
+    image: number-frontend:1.0.0
     container_name: number-frontend
+    environment:
+      - PHRAUD__APP_ENV
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # volumes:
@@ -70,4 +74,5 @@ networks:
 
 volumes:
   Phraud-Database:
+
 

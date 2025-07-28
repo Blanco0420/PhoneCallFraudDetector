@@ -119,15 +119,15 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			if data.VitalInfo.Name == nil {
 				cleanName, suffixes := extractBusinessName(&val)
 
-				*data.BusinessDetails.NameSuffixes = suffixes
+				data.BusinessDetails.NameSuffixes = suffixes
 				// t.currentVitalInfo.Name = cleanName
 				// t.vitalInfoChannel <- *t.currentVitalInfo
-				*data.VitalInfo.Name = cleanName
+				data.VitalInfo.Name = &cleanName
 			}
 		case "住所":
-			if data.BusinessDetails.LocationDetails == (providers.LocationDetails{}) {
-				if err := japaneseinfo.GetAddressInfo(val, &data.BusinessDetails.LocationDetails); err != nil {
-					data.BusinessDetails.LocationDetails = providers.LocationDetails{
+			if data.BusinessDetails.LocationDetails == (&providers.LocationDetails{}) {
+				if err := japaneseinfo.GetAddressInfo(val, data.BusinessDetails.LocationDetails); err != nil {
+					data.BusinessDetails.LocationDetails = &providers.LocationDetails{
 						Prefecture: nil,
 					}
 					continue
@@ -145,7 +145,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 		case "業種タグ":
 			// t.currentVitalInfo.Industry = val
 			// t.vitalInfoChannel <- *t.currentVitalInfo
-			*data.VitalInfo.Industry = val
+			data.VitalInfo.Industry = &val
 		case "ユーザー評価":
 			rating, err := getCleanRating(val)
 			if err != nil {
@@ -190,6 +190,9 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 }
 
 func (t *TelnaviSource) getBusinessInfo(data *providers.NumberDetails, businessTableEntries []providers.TableEntry) error {
+	if data.BusinessDetails == nil {
+		data.BusinessDetails = &providers.BusinessDetails{}
+	}
 	//TODO: Check if doesn't exist
 	for _, entry := range businessTableEntries {
 		key := entry.Key
@@ -198,12 +201,12 @@ func (t *TelnaviSource) getBusinessInfo(data *providers.NumberDetails, businessT
 		switch key {
 		case "事業者名":
 			cleanedName, suffixes := extractBusinessName(&val)
-			*data.BusinessDetails.NameSuffixes = suffixes
+			data.BusinessDetails.NameSuffixes = suffixes
 			// t.currentVitalInfo.Name = cleanedName
 			// t.vitalInfoChannel <- *t.currentVitalInfo
-			*data.VitalInfo.Name = cleanedName
+			data.VitalInfo.Name = &cleanedName
 		case "住所":
-			if err := japaneseinfo.GetAddressInfo(val, &data.BusinessDetails.LocationDetails); err != nil {
+			if err := japaneseinfo.GetAddressInfo(val, data.BusinessDetails.LocationDetails); err != nil {
 				continue
 			}
 		}
@@ -223,7 +226,7 @@ func (t *TelnaviSource) getUserCommentsContainer() (selenium.WebElement, error) 
 
 func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, error) {
 	fmt.Printf("[telnavi] Starting GetData for number: %s\n", phoneNumber)
-	var data providers.NumberDetails
+	data := providers.NewNumberDetails(phoneNumber)
 	// t.currentVitalInfo = &data.VitalInfo
 	data.Number = phoneNumber
 	phoneNumberInfoPageUrl := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)

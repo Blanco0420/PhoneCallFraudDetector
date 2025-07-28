@@ -7,11 +7,11 @@ import (
 	"image"
 	"image/png"
 	"math"
-	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/Blanco0420/Phone-Number-Check/backend/config"
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
 	"github.com/nyaruka/phonenumbers"
 	"gocv.io/x/gocv"
@@ -43,21 +43,27 @@ func (cs *CameraService) Close() error {
 	return nil
 }
 
-func (cs *CameraService) GetFrame() (gocv.Mat, error) {
-	img := gocv.NewMat()
-	if cs.webcam == nil || !cs.webcam.IsOpened() {
-		return img, fmt.Errorf("Camera could not be found")
+func (cs *CameraService) GetFrame(img *gocv.Mat) error {
+	if !config.IsDev {
+		if cs.webcam == nil || !cs.webcam.IsOpened() {
+			return fmt.Errorf("camera could not be found")
+		}
+		if !cs.webcam.Read(img) || img.Empty() {
+			return fmt.Errorf("error getting frame, invalid or empty")
+		}
+		return nil
 	}
-	if !cs.webcam.Read(&img) || img.Empty() {
-		return img, os.ErrInvalid
+	*img = gocv.IMRead("/tmp/Phraud_Example_Image.jpg", gocv.IMReadColor)
+	if img.Empty() {
+		return fmt.Errorf("dev image not found")
 	}
-	return img, nil
+	return nil
 }
 
 func matToBytes(mat gocv.Mat) ([]byte, error) {
 	img, err := mat.ToImage()
 	if err != nil {
-		return nil, fmt.Errorf("Error converting mat to img: %v", err)
+		return nil, fmt.Errorf("error converting mat to img: %v", err)
 	}
 
 	buf := new(bytes.Buffer)
@@ -79,10 +85,13 @@ func (cs *CameraService) MonitorCamera(ctx context.Context, roi RoiData) (string
 		default:
 			// Read frame
 			cameraOutput := gocv.NewMat()
-			if ok := cs.webcam.Read(&cameraOutput); !ok || cameraOutput.Empty() {
+			if err := cs.GetFrame(&cameraOutput); err != nil {
 				cameraOutput.Close()
 				time.Sleep(100 * time.Millisecond)
 				continue
+			}
+			if ok := gocv.IMWrite("./testImage.jpg", cameraOutput); !ok {
+				return "", fmt.Errorf("failed to save test image")
 			}
 
 			bounds := cameraOutput.Size()
@@ -99,13 +108,14 @@ func (cs *CameraService) MonitorCamera(ctx context.Context, roi RoiData) (string
 			rect := image.Rect(x, y, x+w, y+h)
 			croppedInput := cameraOutput.Region(rect)
 			cameraOutput.Close()
-			defer croppedInput.Close()
 
 			outputImage, err := processImage(croppedInput)
 			if err != nil {
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
+			defer outputImage.Close()
+			croppedInput.Close()
 
 			bytes, err := matToBytes(outputImage)
 			if err != nil {

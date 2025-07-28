@@ -66,10 +66,10 @@ func buildFinalDisplayData(data *map[string]providers.NumberDetails) (providerda
 			businessSources = append(businessSources, sourceName)
 
 			suffixes := details.BusinessDetails.NameSuffixes
-			if len(*suffixes) > 0 {
-				for _, suffix := range *suffixes {
-					if !slices.Contains(*suffixes, suffix) {
-						allSuffixes = append(*suffixes, suffix)
+			if len(suffixes) > 0 {
+				for _, suffix := range suffixes {
+					if !slices.Contains(suffixes, suffix) {
+						allSuffixes = append(suffixes, suffix)
 					}
 				}
 			}

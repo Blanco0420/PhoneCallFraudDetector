@@ -54,25 +54,26 @@ func Initialize() (*IpqsSource, error) {
 	return &IpqsSource{config: config, vitalInfoChannel: make(chan providers.VitalInfo)}, nil
 }
 func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error) {
+	data := providers.NewNumberDetails(phoneNumber)
 	requestUrl := strings.Replace(i.config.BaseUrl, "<NUMBER>", phoneNumber, 1)
 	res, err := i.config.HttpClient.Get(requestUrl)
 	if err != nil {
-		return providers.NumberDetails{}, fmt.Errorf("error: %v", err)
+		return data, fmt.Errorf("error: %v", err)
 	}
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		return providers.NumberDetails{}, err
+		return data, err
 	}
 
 	var rawData rawApiData
 	if err := json.Unmarshal(body, &rawData); err != nil {
-		return providers.NumberDetails{}, err
+		return data, err
 	}
 
 	if !rawData.Success {
-		return providers.NumberDetails{}, fmt.Errorf("error getting data from source:\n%v", rawData.Errors)
+		return data, fmt.Errorf("error getting data from source:\n%v", rawData.Errors)
 	}
 
 	switch v := rawData.IdentityData.(type) {
@@ -89,20 +90,24 @@ func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error
 		return providers.NumberDetails{}, err
 	}
 
-	data := providers.NumberDetails{
-		Number:  phoneNumber,
-		Carrier: &rawData.Carrier,
-		VitalInfo: providers.VitalInfo{
-			LineType: lineType,
-			Name:     &rawData.Name,
-			FraudulentDetails: providers.FraudulentDetails{
-				FraudScore:  rawData.FraudScore,
-				RecentAbuse: rawData.RecentAbuse,
-			},
-		},
-	}
+	// data := providers.NumberDetails{
+	// 	Number:  phoneNumber,
+	// 	Carrier: &rawData.Carrier,
+	// 	VitalInfo: providers.VitalInfo{
+	// 		LineType: lineType,
+	// 		Name:     &rawData.Name,
+	// 		FraudulentDetails: providers.FraudulentDetails{
+	// 			FraudScore:  rawData.FraudScore,
+	// 			RecentAbuse: rawData.RecentAbuse,
+	// 		},
+	// 	},
+	// }
+	data.VitalInfo.LineType = lineType
+	data.VitalInfo.Name = &rawData.Name
+	data.VitalInfo.FraudulentDetails.FraudScore = rawData.FraudScore
+	data.VitalInfo.FraudulentDetails.RecentAbuse = rawData.RecentAbuse
 
-	if err := japaneseinfo.GetAddressInfo(fmt.Sprintf("%s%s", rawData.Region, rawData.City), &data.BusinessDetails.LocationDetails); err != nil {
+	if err := japaneseinfo.GetAddressInfo(fmt.Sprintf("%s%s", rawData.Region, rawData.City), data.BusinessDetails.LocationDetails); err != nil {
 		return data, err
 	}
 

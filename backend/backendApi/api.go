@@ -15,9 +15,10 @@ func setupRoutes(ROIChannel chan webcamdetection.RoiData, webcam *webcamdetectio
 
 	r := gin.Default()
 	r.GET("/getCurrentImage", func(ctx *gin.Context) {
-		img, err := webcam.GetFrame()
-		if err != nil {
+		img := gocv.NewMat()
+		if err := webcam.GetFrame(&img); err != nil {
 			ctx.JSON(500, err)
+			return
 		}
 		defer img.Close()
 		if img.Empty() {

@@ -10,8 +10,11 @@ import (
 	"github.com/Blanco0420/Phone-Number-Check/backend/config"
 	"github.com/Blanco0420/Phone-Number-Check/backend/ent"
 	"github.com/Blanco0420/Phone-Number-Check/backend/ent/address"
+	"github.com/Blanco0420/Phone-Number-Check/backend/ent/business"
+	"github.com/Blanco0420/Phone-Number-Check/backend/ent/caller"
 	"github.com/Blanco0420/Phone-Number-Check/backend/ent/carrier"
 	"github.com/Blanco0420/Phone-Number-Check/backend/ent/linetype"
+	"github.com/Blanco0420/Phone-Number-Check/backend/ent/number"
 	"github.com/Blanco0420/Phone-Number-Check/backend/ent/provider"
 	"github.com/Blanco0420/Phone-Number-Check/backend/providers"
 	_ "github.com/lib/pq"
@@ -25,7 +28,7 @@ func readSecret(path string) (string, error) {
 	var content string
 	rawContent, err := os.ReadFile(path)
 	if err != nil {
-		return content, fmt.Errorf("Error reading secrets file %s: %v", path, err)
+		return content, fmt.Errorf("error reading secrets file %s: %v", path, err)
 	}
 	content = strings.TrimSpace(string(rawContent))
 	return content, nil
@@ -101,13 +104,13 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 	if err != nil {
 		return err
 	}
-	comitted := false
+	committed := false
 	defer func() {
 		if r := recover(); r != nil {
 			_ = tx.Rollback()
 			panic(r)
 		}
-		if !comitted {
+		if !committed {
 			_ = tx.Rollback()
 		}
 	}()
@@ -115,91 +118,179 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 	for providerName, details := range data {
 
 		// Try to find or create Carrier
-		carrier, err := tx.Carrier.Query().
-			Where(carrier.NameEQ(*details.Carrier)).
-			Only(ctx)
-		if ent.IsNotFound(err) {
-			carrier, err = tx.Carrier.Create().
-				SetName(*details.Carrier).
-				Save(ctx)
+		// carrier, err := tx.Carrier.Query().
+		// 	Where(carrier.NameEQ(*details.Carrier)).
+		// 	Only(ctx)
+		// if ent.IsNotFound(err) {
+		// 	carrier, err = tx.Carrier.Create().
+		// 		SetName(*details.Carrier).
+		// 		Save(ctx)
+		// }
+		// if err != nil {
+		// 	return err
+		// }
+		var carrierSchema *ent.Carrier
+		if details.Carrier != nil {
+			carrierSchema, err = getOrCreate(
+				func() (*ent.Carrier, error) {
+					return tx.Carrier.Query().Where(carrier.NameEQ(*details.Carrier)).Only(ctx)
+				},
+
+				func() (*ent.Carrier, error) {
+					return tx.Carrier.Create().
+						SetNillableName(details.Carrier).
+						Save(ctx)
+				},
+			)
+			if err != nil {
+				return err
+			}
 		}
+
+		lineType, err := getOrCreate(
+			func() (*ent.LineType, error) {
+				return tx.LineType.Query().Where(linetype.LineTypeEQ(details.VitalInfo.LineType)).Only(ctx)
+			},
+			func() (*ent.LineType, error) {
+				return tx.LineType.Create().
+					SetLineType(details.VitalInfo.LineType).
+					Save(ctx)
+			},
+		)
+		if err != nil {
+			return err
+		}
+
+		caller, err := getOrCreate(
+			func() (*ent.Caller, error) {
+				return tx.Caller.Query().Where(caller.HasNumberWith(number.NumberEQ(details.Number))).Only(ctx)
+			},
+			func() (*ent.Caller, error) {
+				return tx.Caller.Create().
+					SetFraudScore(finalFraudScore).
+					SetIsFraud(finalFraudScore > 40).
+					Save(ctx)
+			},
+		)
+		if err != nil {
+			return err
+		}
+
+		number, err := getOrCreate(
+			func() (*ent.Number, error) {
+				return tx.Number.Query().Where(number.NumberEQ(details.Number)).
+					Only(ctx)
+			},
+			func() (*ent.Number, error) {
+				return tx.Number.Create().
+					SetNumber(details.Number).
+					SetCarrier(carrierSchema).
+					SetCaller(caller).
+					SetLinetype(lineType).
+					Save(ctx)
+			},
+		)
+		if err != nil {
+			return err
+		}
+
+		provider, err := getOrCreate(
+			func() (*ent.Provider, error) {
+				return tx.Provider.Query().Where(provider.NameEQ(providerName)).Only(ctx)
+			},
+
+			func() (*ent.Provider, error) {
+				return tx.Provider.Create().
+					SetName(providerName).
+					SetNumber(number).
+					Save(ctx)
+			},
+		)
 		if err != nil {
 			return err
 		}
 
 		// Try to find or create LineType
-		lineType, err := tx.LineType.Query().
-			Where(linetype.LineTypeEQ(details.VitalInfo.LineType)).
-			Only(ctx)
-		if ent.IsNotFound(err) {
-			lineType, err = tx.LineType.Create().
-				SetLineType(details.VitalInfo.LineType).
-				Save(ctx)
-		}
-		if err != nil {
-			return err
-		}
+		// lineType, err := tx.LineType.Query().
+		// 	Where(linetype.LineTypeEQ(details.VitalInfo.LineType)).
+		// 	Only(ctx)
+		// if ent.IsNotFound(err) {
+		// 	lineType, err = tx.LineType.Create().
+		// 		SetLineType(details.VitalInfo.LineType).
+		// 		Save(ctx)
+		// }
+		// if err != nil {
+		// 	return err
+		// }
 
 		// Always create new Caller (assumed unique for each request)
-		caller, err := tx.Caller.Create().
-			SetFraudScore(finalFraudScore).
-			SetIsFraud(finalFraudScore > 40).
-			Save(ctx)
-		if err != nil {
-			return err
-		}
-
-		// Always create new Number (assumed unique per details.Number)
-		number, err := tx.Number.Create().
-			SetCarrier(carrier).
-			SetCaller(caller).
-			SetLinetype(lineType).
-			SetNumber(details.Number).
-			Save(ctx)
-		if err != nil {
-			return err
-		}
-
-		// Try to find or create Provider
-		provider, err := tx.Provider.Query().
-			Where(provider.NameEQ(providerName)).
-			Only(ctx)
-		if ent.IsNotFound(err) {
-			provider, err = tx.Provider.Create().
-				SetName(providerName).
-				SetNumber(number).
-				Save(ctx)
-		}
-		if err != nil {
-			return err
-		}
+		// caller, err := tx.Caller.Create().
+		// 	SetFraudScore(finalFraudScore).
+		// 	SetIsFraud(finalFraudScore > 40).
+		// 	Save(ctx)
+		// if err != nil {
+		// 	return err
+		// }
 
 		// Always create new Business
-		business, err := tx.Business.Create().
-			SetName(*details.VitalInfo.Name).
-			SetOverview(*details.VitalInfo.CompanyOverview).
-			SetProvider(provider).
-			Save(ctx)
-		if err != nil {
-			return err
-		}
-
-		// Always create new Address
-		_, err = tx.Address.Query().
-			Where(address.PostcodeEQ(*details.BusinessDetails.LocationDetails.PostCode)).
-			Only(ctx)
-
-		if ent.IsNotFound(err) {
-			_, err = tx.Address.Create().
-				SetBusiness(business).
-				SetCity(*details.BusinessDetails.LocationDetails.City).
-				SetPrefecture(*details.BusinessDetails.LocationDetails.Prefecture).
-				SetPostcode(*details.BusinessDetails.LocationDetails.PostCode).
-				Save(ctx)
+		var businessSchema *ent.Business
+		if details.BusinessDetails != nil {
+			businessSchema, err = getOrCreate(
+				func() (*ent.Business, error) {
+					return tx.Business.Query().Where(business.NameEQ(safeString(details.VitalInfo.Name))).Only(ctx)
+				},
+				func() (*ent.Business, error) {
+					return tx.Business.Create().
+						SetNillableName(details.VitalInfo.Name).
+						SetNillableOverview(details.VitalInfo.CompanyOverview).
+						SetProvider(provider).
+						SetNillableWebsiteLink(details.BusinessDetails.Website).
+						Save(ctx)
+				},
+			)
 			if err != nil {
 				return err
 			}
+			if details.BusinessDetails.LocationDetails != nil {
+				if details.BusinessDetails.LocationDetails.PostCode != nil {
+					_, err = getOrCreate(
+						func() (*ent.Address, error) {
+							return tx.Address.Query().
+								Where(address.PostcodeEQ(safeString(details.BusinessDetails.LocationDetails.PostCode))).
+								Only(ctx)
+						},
+						func() (*ent.Address, error) {
+							return tx.Address.Create().
+								SetBusiness(businessSchema).
+								SetNillableCity(details.BusinessDetails.LocationDetails.City).
+								SetNillablePrefecture(details.BusinessDetails.LocationDetails.Prefecture).
+								SetNillablePostcode(details.BusinessDetails.LocationDetails.PostCode).
+								Save(ctx)
+						},
+					)
+					if err != nil {
+						return err
+					}
+				} else if details.BusinessDetails.LocationDetails.City != nil {
+					_, err := tx.Address.Query().
+						Where(address.CityEQ(safeString(details.BusinessDetails.LocationDetails.City))).
+						Only(ctx)
+					if !ent.IsNotFound(err) {
+						return err
+					}
+				}
+			}
 		}
+		// tx.Business.Create().
+		// 	SetName(*details.VitalInfo.Name).
+		// 	SetOverview(*details.VitalInfo.CompanyOverview).
+		// 	SetProvider(provider).
+		// 	Save(ctx)
+		// if err != nil {
+		// 	return err
+		// }
+
+		// Always create new Address
 
 		// Bulk insert Comments
 		commentBuilders := getCommentBuilders(tx, details.SiteInfo.Comments)
@@ -210,12 +301,20 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	comitted = true
+	committed = true
 	return nil
 }
 
 func (d *DatabaseDriver) Close() {
 	if d.client != nil {
-		d.Close()
+		_ = d.client.Close()
 	}
+}
+
+// safeString returns the dereferenced value of a string pointer, or "" if nil.
+func safeString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

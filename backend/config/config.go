@@ -2,20 +2,19 @@ package config
 
 import (
 	"os"
+)
 
-	"github.com/joho/godotenv"
-	"github.com/rs/zerolog/log"
+var (
+	IsDev bool = false
 )
 
 func LoadEnv() {
-	env := os.Getenv("NUMBER__APP_ENV")
-
-	if env == "dev" {
-		if err := godotenv.Load(); err != nil {
-			log.Warn().Msg("Failed to load .env file. Continuing without.")
+	// devVar := os.Getenv("PHRAUD__APP_ENV")
+	if val, exists := os.LookupEnv("PHRAUD__APP_ENV"); exists {
+		if val == "dev" {
+			IsDev = true
 		}
 	}
-
 	initLevenshtein()
 }
 

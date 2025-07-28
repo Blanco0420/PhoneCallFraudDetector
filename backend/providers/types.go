@@ -39,8 +39,8 @@ type LocationDetails struct {
 
 type BusinessDetails struct {
 	Website         *string
-	LocationDetails LocationDetails
-	NameSuffixes    *[]string
+	LocationDetails *LocationDetails
+	NameSuffixes    []string
 }
 
 type VitalInfo struct {
@@ -57,8 +57,17 @@ type NumberDetails struct {
 	//TODO: Change to enum? (like LineType)
 	Carrier         *string
 	VitalInfo       VitalInfo
-	BusinessDetails BusinessDetails
+	BusinessDetails *BusinessDetails
 	SiteInfo        SiteInfo
+}
+
+func NewNumberDetails(number string) NumberDetails {
+	return NumberDetails{
+		Number: number,
+		BusinessDetails: &BusinessDetails{
+			LocationDetails: &LocationDetails{},
+		},
+	}
 }
 
 type FraudulentDetails struct {

@@ -161,8 +161,10 @@ func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
 // 	return label, value, nil
 // }
 
-func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, businessDetails *providers.BusinessDetails) error {
-
+func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails) error {
+	if data.BusinessDetails == nil {
+		data.BusinessDetails = &providers.BusinessDetails{}
+	}
 	businessInfoTableContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
 	if err != nil {
 		return fmt.Errorf("no business details available")
@@ -188,22 +190,22 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, business
 			switch key {
 			case "Name", "事業者名称":
 				cleanName, suffixes := utils.GetSuffixesFromCompanyName(&value)
-				*data.BusinessDetails.NameSuffixes = suffixes
-				*data.VitalInfo.Name = cleanName
+				data.BusinessDetails.NameSuffixes = suffixes
+				data.VitalInfo.Name = &cleanName
 				// s.currentVitalInfo.Name = cleanName
 				// s.vitalInfoChannel <- *s.currentVitalInfo
 			case "Industry", "業種":
 				// s.currentVitalInfo.Industry = value
 				// s.vitalInfoChannel <- *s.currentVitalInfo
-				*data.VitalInfo.Industry = value
+				data.VitalInfo.Industry = &value
 			case "Address", "住所":
-				japaneseinfo.GetAddressInfo(value, &businessDetails.LocationDetails)
+				japaneseinfo.GetAddressInfo(value, data.BusinessDetails.LocationDetails)
 			case "Official website", "公式サイト":
-				*businessDetails.Website = value
+				data.BusinessDetails.Website = &value
 			case "Business", "事業紹介":
 				// s.currentVitalInfo.CompanyOverview = value
 				// s.vitalInfoChannel <- *s.currentVitalInfo
-				*data.VitalInfo.CompanyOverview = value
+				data.VitalInfo.CompanyOverview = &value
 			}
 		}
 	}
@@ -218,7 +220,7 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails, business
 
 func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error) {
 	numberQuery := fmt.Sprintf("%s/searchnumber.do?number=%s", baseUrl, number)
-	var data providers.NumberDetails
+	data := providers.NewNumberDetails(number)
 	// s.currentVitalInfo = &data.VitalInfo
 
 	data.Number = number
@@ -255,7 +257,7 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	s.driver.GotoUrl(detailesPagesUrl)
 	s.driver.LoadCookies(webdriver.JpNumberWebScrapingProvider)
 
-	if err := s.getBusinessInfo(&data, &data.BusinessDetails); err != nil {
+	if err := s.getBusinessInfo(&data); err != nil {
 		if strings.Contains(err.Error(), "no business details available") {
 		} else {
 			return data, err
@@ -267,11 +269,15 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	if err != nil {
 		return data, err
 	}
+	//TODO: Move somehwere else
+	if data.BusinessDetails.LocationDetails == nil {
+		data.BusinessDetails.LocationDetails = &providers.LocationDetails{}
+	}
 	prefecture, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(4)>td:nth-child(2)")
-	*data.BusinessDetails.LocationDetails.Prefecture = *prefecture
+	data.BusinessDetails.LocationDetails.Prefecture = prefecture
 
 	carrier, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(3)>td:nth-child(4)")
-	*data.Carrier = *carrier
+	data.Carrier = carrier
 
 	reviewCount, err := s.driver.GetInnerText(phoneNumberInfoContainer, "span.red")
 	if err != nil {
