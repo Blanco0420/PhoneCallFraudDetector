@@ -1,5 +1,5 @@
 import axios from "axios"
-import { useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import ReactCrop from "react-image-crop"
 import 'react-image-crop/dist/ReactCrop.css'
 const CroppingElement = () => {
