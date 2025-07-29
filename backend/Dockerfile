@@ -68,4 +68,4 @@ CMD [ "air", "-c", ".air.toml" ]
 # === === PROD === ===
 FROM base AS prod
 RUN go build -o backend
-CMD ["./proxy"]
+CMD ["./backend"]
