@@ -12,6 +12,11 @@ export default defineConfig({
         secure: false,
         changeOrigin: true,
         rewrite: path => path.replace(/^\/api/, ''),
+      },
+      "/ws": {
+        target: "ws://number-backend:8080",
+        secure: false,
+        ws: true
       }
     }
   },

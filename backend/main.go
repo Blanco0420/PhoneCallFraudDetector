@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	backendwebsocket "github.com/Blanco0420/Phone-Number-Check/backend/backendWebSocket"
 	"github.com/Blanco0420/Phone-Number-Check/backend/config"
 	databasedriver "github.com/Blanco0420/Phone-Number-Check/backend/databaseDriver"
 	"github.com/Blanco0420/Phone-Number-Check/backend/ent"
@@ -23,7 +24,6 @@ import (
 
 	"runtime"
 
-	backendapi "github.com/Blanco0420/Phone-Number-Check/backend/backendApi"
 	webcamdetection "github.com/Blanco0420/Phone-Number-Check/backend/webcamDetection"
 
 	_ "net/http/pprof"
@@ -236,12 +236,16 @@ func initializeServices() (*Services, error) {
 	}
 	roiChan := make(chan webcamdetection.RoiData, 1)
 
-	go func() {
-		if err := backendapi.StartBackendApi(roiChan, cs); err != nil {
-			logging.Fatal().Err(err).Msg("Failed to start backend api service")
-			os.Exit(1)
-		}
-	}()
+	// go func() {
+	// 	if err := backendapi.StartBackendApi(roiChan, cs); err != nil {
+	// 		logging.Fatal().Err(err).Msg("Failed to start backend api service")
+	// 		os.Exit(1)
+	// 	}
+	// }()
+	logging.Info().Msg("Initating websocket")
+	if err := backendwebsocket.SetupWebsocket(cs); err != nil {
+		return nil, err
+	}
 
 	logging.Info().Msg("Loading environment file")
 	config.LoadEnv()
