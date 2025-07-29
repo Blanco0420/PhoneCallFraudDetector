@@ -243,9 +243,11 @@ func initializeServices() (*Services, error) {
 	// 	}
 	// }()
 	logging.Info().Msg("Initating websocket")
-	if err := backendwebsocket.SetupWebsocket(cs); err != nil {
-		return nil, err
-	}
+	go func() {
+		if err := backendwebsocket.SetupWebsocket(cs); err != nil {
+			logging.Fatal().Err(err).Msg("Failed to start websocket")
+		}
+	}()
 
 	logging.Info().Msg("Loading environment file")
 	config.LoadEnv()

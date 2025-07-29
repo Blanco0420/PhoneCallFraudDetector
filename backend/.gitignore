@@ -4,6 +4,7 @@
 LDNOOBW-bad.txt
 
 ### direnv ###
+
 .direnv
 .envrc
 .env
@@ -388,4 +389,6 @@ MigrationBackup/
 .ionide/
 
 # End of https://www.toptal.com/developers/gitignore/api/direnv,go,vs
+
+tmp/
 

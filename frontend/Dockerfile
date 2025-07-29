@@ -24,7 +24,7 @@ RUN yarn install --frozen-lockfile
 
 # === === DEV === ===
 FROM base AS dev
-COPY . .
+# COPY . .
 CMD ["yarn", "dev", "--host"]
 
 # === === PROD === ===

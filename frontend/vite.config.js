@@ -15,8 +15,8 @@ export default defineConfig({
       },
       "/ws": {
         target: "ws://number-backend:8080",
-        secure: false,
-        ws: true
+        ws: true,
+        changeOrigin: true
       }
     }
   },

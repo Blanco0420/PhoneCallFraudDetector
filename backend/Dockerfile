@@ -52,7 +52,6 @@ COPY ./go.sum .
 
 RUN go mod download
 
-COPY . .
 
 EXPOSE 8080
 
@@ -67,5 +66,7 @@ CMD [ "air", "-c", ".air.toml" ]
 
 # === === PROD === ===
 FROM base AS prod
+
+COPY . .
 RUN go build -o backend
 CMD ["./backend"]

@@ -13,7 +13,7 @@ import (
 var logger zerolog.Logger
 
 func getLogLevel() zerolog.Level {
-	logLevelEnvVar, exists := config.GetEnvVariable("LOG_LEVEL")
+	logLevelEnvVar, exists := config.GetEnvVariable("PHRAUD__LOG_LEVEL")
 	if !exists {
 		return zerolog.InfoLevel
 	}

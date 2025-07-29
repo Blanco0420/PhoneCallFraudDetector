@@ -15,6 +15,7 @@ services:
     networks:
       - number
     ports:
+      - 8080:8080
       # Dev port
       - 40000:40000
     shm_size: '2g'
@@ -56,17 +57,17 @@ services:
       - PHRAUD__APP_ENV
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # volumes:
-    #   - ./frontend/vite-app:/app
+    volumes:
+      - ./frontend:/app
     networks:
       - number
     ports:
       - 3000:80
-    develop:
-      watch:
-        - path: ./frontend
-          target: /app
-          action: sync
+    # develop:
+    #   watch:
+    #     - path: ./frontend
+    #       target: /app
+    #       action: sync
 
 networks:
   number:
