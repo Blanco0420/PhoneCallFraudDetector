@@ -8,7 +8,6 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/ikawaha/kagome-dict/ipa v1.2.5
 	github.com/ikawaha/kagome/v2 v2.10.2
-	github.com/joho/godotenv v1.5.1
 	github.com/lib/pq v1.10.9
 	github.com/nyaruka/phonenumbers v1.6.3
 	github.com/otiai10/gosseract/v2 v2.4.1

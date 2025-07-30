@@ -50,16 +50,12 @@ func sendFrames(ws *websocket.Conn, cs *webcamdetection.CameraService) error {
 	return nil
 }
 
-type websocketMessage struct {
-	command string
-	payload json.RawMessage
+type WebsocketMessage struct {
+	Command string
+	Payload webcamdetection.RoiData
 }
 
-func handleCommand(messageType int, data []byte) error {
-	return nil
-}
-
-func wsHandler(cs *webcamdetection.CameraService) http.HandlerFunc {
+func wsHandler(websocketMessageChannel chan WebsocketMessage, cs *webcamdetection.CameraService) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ws, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -76,7 +72,15 @@ func wsHandler(cs *webcamdetection.CameraService) http.HandlerFunc {
 					logging.Error().Err(err).Msg("websocket read failed (client likely disconnected)")
 					break
 				}
-				logging.Debug().Msgf("Message from client:\n%s", string(data))
+				if messageType != websocket.TextMessage {
+					logging.Warn().Msgf("Received unknown message type from websocket client: %d", messageType)
+					continue
+				}
+				var websocketMessage WebsocketMessage
+				if err := json.Unmarshal(data, &websocketMessage); err != nil {
+					logging.Error().Err(err).Msg("Failed to unmarshal json data from client")
+				}
+				websocketMessageChannel <- websocketMessage
 			}
 		}()
 
@@ -101,8 +105,8 @@ func wsHandler(cs *webcamdetection.CameraService) http.HandlerFunc {
 // 	}
 // }
 
-func SetupWebsocket(cs *webcamdetection.CameraService) error {
-	http.HandleFunc("/ws", wsHandler(cs))
+func SetupWebsocket(websocketMessageChannel chan WebsocketMessage, cs *webcamdetection.CameraService) error {
+	http.HandleFunc("/ws", wsHandler(websocketMessageChannel, cs))
 	// http.HandleFunc("/ping", ping)
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		return err

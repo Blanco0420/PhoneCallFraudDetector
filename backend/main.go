@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -12,7 +13,6 @@ import (
 	backendwebsocket "github.com/Blanco0420/Phone-Number-Check/backend/backendWebSocket"
 	"github.com/Blanco0420/Phone-Number-Check/backend/config"
 	databasedriver "github.com/Blanco0420/Phone-Number-Check/backend/databaseDriver"
-	"github.com/Blanco0420/Phone-Number-Check/backend/ent"
 	japanesetokenizing "github.com/Blanco0420/Phone-Number-Check/backend/japaneseTokenizing"
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
 	"github.com/Blanco0420/Phone-Number-Check/backend/profanityAnalyzing"
@@ -21,8 +21,6 @@ import (
 	"github.com/Blanco0420/Phone-Number-Check/backend/providers/jpnumber"
 	"github.com/Blanco0420/Phone-Number-Check/backend/providers/telnavi"
 	"github.com/Blanco0420/Phone-Number-Check/backend/utils"
-
-	"runtime"
 
 	webcamdetection "github.com/Blanco0420/Phone-Number-Check/backend/webcamDetection"
 
@@ -221,10 +219,10 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 // }
 
 type Services struct {
-	CameraService  *webcamdetection.CameraService
-	RoiChan        chan webcamdetection.RoiData
-	Sources        map[string]providers.Source
-	DatabaseDriver *databasedriver.DatabaseDriver
+	CameraService    *webcamdetection.CameraService
+	WebsocketChannel chan backendwebsocket.WebsocketMessage
+	Sources          map[string]providers.Source
+	DatabaseDriver   *databasedriver.DatabaseDriver
 }
 
 // initializeServices sets up all required services and providers
@@ -234,7 +232,6 @@ func initializeServices() (*Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	roiChan := make(chan webcamdetection.RoiData, 1)
 
 	// go func() {
 	// 	if err := backendapi.StartBackendApi(roiChan, cs); err != nil {
@@ -243,8 +240,10 @@ func initializeServices() (*Services, error) {
 	// 	}
 	// }()
 	logging.Info().Msg("Initating websocket")
+	websocketMessageChannel := make(chan backendwebsocket.WebsocketMessage)
 	go func() {
-		if err := backendwebsocket.SetupWebsocket(cs); err != nil {
+		err := backendwebsocket.SetupWebsocket(websocketMessageChannel, cs)
+		if err != nil {
 			logging.Fatal().Err(err).Msg("Failed to start websocket")
 		}
 	}()
@@ -307,10 +306,10 @@ func initializeServices() (*Services, error) {
 	}
 
 	return &Services{
-		CameraService:  cs,
-		RoiChan:        roiChan,
-		Sources:        sources,
-		DatabaseDriver: databaseDriver,
+		CameraService:    cs,
+		WebsocketChannel: websocketMessageChannel,
+		Sources:          sources,
+		DatabaseDriver:   databaseDriver,
 	}, nil
 }
 
@@ -357,20 +356,15 @@ type numberResult struct {
 	Err    error
 }
 
-func monitorAndParseNumber(cs *webcamdetection.CameraService, roiChan chan webcamdetection.RoiData) (string, error) {
+func monitorAndParseNumber(cs *webcamdetection.CameraService, roiData webcamdetection.RoiData) (string, error) {
 	for {
-		roi, ok := <-roiChan
-		if !ok {
-			return "", fmt.Errorf("roiChan was closed")
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 		defer cancel()
 
 		numberChan := make(chan numberResult, 1)
 
 		go func() {
-			num, err := cs.MonitorCamera(ctx, roi)
+			num, err := cs.MonitorCamera(ctx, roiData)
 			if err != nil {
 				logging.Error().Err(err).Msg("Error monitoring camera")
 				return
@@ -419,13 +413,55 @@ func processNumber(num string, data *map[string]providers.NumberDetails, sources
 // 	return nil
 // }
 
+// Add resource monitoring
+func startResourceMonitor(interval time.Duration) {
+	go func() {
+		var m runtime.MemStats
+		for {
+			runtime.ReadMemStats(&m)
+			numGoroutine := runtime.NumGoroutine()
+			logging.Info().Msgf(
+				"MEM: Alloc = %v MiB, TotalAlloc = %v MiB, Sys = %v MiB, NumGC = %v, Goroutines = %v",
+				bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC, numGoroutine,
+			)
+			time.Sleep(interval)
+		}
+	}()
+}
+
 // mainLoop orchestrates the monitoring and processing in a loop
 func mainLoop(services *Services) {
 	ctx := context.Background()
-	for {
-		logging.Info().Msg("Waiting for ROI selection and valid number...")
 
-		num, err := monitorAndParseNumber(services.CameraService, services.RoiChan)
+	var (
+		startChan = make(chan webcamdetection.RoiData, 1)
+	)
+
+	// Single goroutine that listens to WebSocket messages
+	go func() {
+		for msg := range services.WebsocketChannel {
+			switch msg.Command {
+			case "start":
+				logging.Info().Msg("Received 'start' command")
+				startChan <- msg.Payload // send to main loop
+			case "stop":
+				logging.Info().Msg("Received 'stop' command")
+				// Optionally implement stop logic, e.g., canceling context
+			default:
+				logging.Error().Msgf("error on websocket command, unknown command: %s", msg.Command)
+			}
+		}
+	}()
+
+	for {
+		logging.Info().Msg("Waiting for 'start' command from websocket...")
+
+		// Wait here until we receive a payload from the 'start' command
+		payload := <-startChan
+
+		logging.Info().Msg("Received start payload, beginning number monitoring...")
+
+		num, err := monitorAndParseNumber(services.CameraService, payload)
 		if err != nil {
 			if strings.Contains(err.Error(), "timed out reading number") {
 				logging.Warn().Msg("Timed out waiting for a valid number, retrying...")
@@ -453,100 +489,8 @@ func mainLoop(services *Services) {
 	}
 }
 
-// Add resource monitoring
-func startResourceMonitor(interval time.Duration) {
-	go func() {
-		var m runtime.MemStats
-		for {
-			runtime.ReadMemStats(&m)
-			numGoroutine := runtime.NumGoroutine()
-			logging.Info().Msgf(
-				"MEM: Alloc = %v MiB, TotalAlloc = %v MiB, Sys = %v MiB, NumGC = %v, Goroutines = %v",
-				bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC, numGoroutine,
-			)
-			time.Sleep(interval)
-		}
-	}()
-}
-
 func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
-}
-
-func testingDatabase(driver *ent.Client) {
-	ctxSchema, cancelSchema := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelSchema()
-
-	exampleProvider, err := driver.Provider.Create().
-		SetName("Example provider").
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	exampleBusiness, err := driver.Business.Create().
-		SetName("Example business name").
-		SetProvider(exampleProvider).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	_, err = driver.Address.Create().
-		SetCity("Example city").
-		SetPostcode("180-3021").
-		SetPrefecture("Example prefecture").
-		SetBusiness(exampleBusiness).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	_, err = driver.Comment.Create().
-		SetCommentText("Example comment text 1").
-		SetPostDate(time.Now()).
-		SetCommentFraudScore(67).
-		SetProvider(exampleProvider).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	_, err = driver.Comment.Create().
-		SetCommentText("Example comment text 2").
-		SetPostDate(time.Now()).
-		SetCommentFraudScore(32).
-		SetProvider(exampleProvider).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	exampleCarrier, err := driver.Carrier.Create().
-		SetName("Rakuten").
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	exampleLineType, err := driver.LineType.Create().
-		SetLineType(providers.LineTypeMobile).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-	exampleNumber, err := driver.Number.Create().
-		SetNumber("07091762683").
-		SetCarrier(exampleCarrier).
-		SetLinetype(exampleLineType).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-
-	_, err = driver.Caller.Create().
-		SetFraudScore(96).
-		SetIsFraud(true).
-		AddNumber(exampleNumber).
-		Save(ctxSchema)
-	if err != nil {
-		panic(err)
-	}
-
 }
 
 func main() {

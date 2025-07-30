@@ -1,15 +1,17 @@
-import React, { useState } from "react"
+import React, { useRef, useState } from "react"
 import { useEffect } from "react"
 import ReactCrop, { PixelCrop } from "react-image-crop";
 import useWebSocket from "react-use-websocket";
 
-type Props = {
-  websocket: WebSocket;
+type WebsocketMessage = {
+  command: string;
+  payload: object | undefined;
 }
 
-const NewCroppingElement: React.FC<Props> = () => {
+const NewCroppingElement = () => {
   const [imageSrc, setImageSrc] = useState<string | undefined>(undefined)
   const [crop, setCrop] = useState<PixelCrop>()
+  const imageRef = useRef<HTMLImageElement | null>(null)
 
   const [socketUrl, setSocketUrl] = useState<string>(`ws://${window.location.host}/ws`)
   const { sendMessage, lastMessage, readyState } = useWebSocket(socketUrl)
@@ -22,7 +24,27 @@ const NewCroppingElement: React.FC<Props> = () => {
   }, [lastMessage])
 
   const sendCropData = () => {
-    sendMessage("test")
+    const image = imageRef.current;
+        if (!image || !crop) {
+      console.log("No crop or no image")
+      return
+    }
+    const scaleX = image.naturalWidth / image.clientWidth
+    const scaleY = image.naturalHeight / image.clientHeight
+    const data = {
+      x: crop.x * scaleX,
+      y: crop.y * scaleY,
+      width: crop.width * scaleX,
+      height: crop.height * scaleY
+    }
+    const payload :WebsocketMessage = {
+      command: "start",
+      payload: data
+    }
+    const payloadString = JSON.stringify(payload)
+    console.log(payloadString)
+    console.log(crop)
+    sendMessage(payloadString)
   }
 
   return (
@@ -33,7 +55,7 @@ const NewCroppingElement: React.FC<Props> = () => {
       <div style={{ border: '1px solid #eee', borderRadius: 6, padding: 8, background: '#fff' }}>
         {imageSrc &&
           <ReactCrop crop={crop} onChange={c => setCrop(c)}>
-            <img style={{ height: 640, width: "100%", objectFit: 'contain', borderRadius: 4 }} src={imageSrc} />
+            <img ref={imageRef} style={{ height: 640, width: "100%", objectFit: 'contain', borderRadius: 4 }} src={imageSrc} />
           </ReactCrop>
         }
       </div>
