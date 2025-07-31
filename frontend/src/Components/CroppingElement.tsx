@@ -2,13 +2,14 @@ import React, { useRef, useState } from "react"
 import { useEffect } from "react"
 import ReactCrop, { PixelCrop } from "react-image-crop";
 import useWebSocket from "react-use-websocket";
+import 'react-image-crop/dist/ReactCrop.css'
 
 type WebsocketMessage = {
   command: string;
   payload: object | undefined;
 }
 
-const NewCroppingElement = () => {
+const CroppingElement = () => {
   const [imageSrc, setImageSrc] = useState<string | undefined>(undefined)
   const [crop, setCrop] = useState<PixelCrop>()
   const imageRef = useRef<HTMLImageElement | null>(null)
@@ -23,9 +24,17 @@ const NewCroppingElement = () => {
     }
   }, [lastMessage])
 
+  const pauseSystem = () => {
+    const payload: WebsocketMessage = {
+      command: "stop",
+      payload: {}
+    }
+    sendMessage(JSON.stringify(payload))
+  }
+
   const sendCropData = () => {
     const image = imageRef.current;
-        if (!image || !crop) {
+    if (!image || !crop) {
       console.log("No crop or no image")
       return
     }
@@ -37,7 +46,7 @@ const NewCroppingElement = () => {
       width: crop.width * scaleX,
       height: crop.height * scaleY
     }
-    const payload :WebsocketMessage = {
+    const payload: WebsocketMessage = {
       command: "start",
       payload: data
     }
@@ -51,6 +60,7 @@ const NewCroppingElement = () => {
     <div style={{ border: '1px solid #ccc', borderRadius: 8, padding: 24, maxWidth: 1200, margin: '32px auto', background: '#fafbfc', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
       <div style={{ display: 'flex', gap: 12, marginBottom: 18 }}>
         <button style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #888', background: '#f0f0f0', cursor: 'pointer' }} onClick={sendCropData}>Send data</button>
+        <button style={{ padding: '8px 16px', borderRadius: 4, border: '1px solid #888', background: '#f0f0f0', cursor: 'pointer' }} onClick={pauseSystem}>Pause system</button>
       </div>
       <div style={{ border: '1px solid #eee', borderRadius: 6, padding: 8, background: '#fff' }}>
         {imageSrc &&
@@ -59,9 +69,8 @@ const NewCroppingElement = () => {
           </ReactCrop>
         }
       </div>
-      {/* <Cropper key={imageSrc} ref={cropperRef} viewMode={1} src={imageSrc} crop={onCrop} style={{ height: 400, width: "100%" }} guides={true} /> */}
     </div>
   )
 }
 
-export default NewCroppingElement
+export default CroppingElement

@@ -1,7 +1,9 @@
 package telnavi
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,7 +21,8 @@ import (
 )
 
 const (
-	baseUrl = "https://www.telnavi.jp/phone"
+	baseUrl    = "https://www.telnavi.jp/phone"
+	sourceName = "telnavi"
 	//NOTE: 推定発信地域 estimated outgoing area (maybe use later)
 )
 
@@ -40,7 +43,6 @@ type TelnaviSource struct {
 func Initialize() (*TelnaviSource, error) {
 	driver, err := webdriver.InitializeDriver(webdriver.TelnaviWebScrapingProvider)
 	if err != nil {
-		fmt.Println("here")
 		return &TelnaviSource{}, err
 	}
 	return &TelnaviSource{
@@ -86,6 +88,7 @@ func (t *TelnaviSource) calculateFraudScore(ratingTableContainer selenium.WebEle
 }
 
 func (t *TelnaviSource) getGraphData(graphData *[]providers.GraphData) error {
+	//TODO: Make it return an empty list if 0 graph data found (if needed? check if graph is always there and just returns empty if there's nothing)
 	script := `
   if (window.pageview_stat) {
     return JSON.stringify(window.pageview_stat); // return JSON string of the object
@@ -94,13 +97,13 @@ func (t *TelnaviSource) getGraphData(graphData *[]providers.GraphData) error {
 
 	rawData, err := t.driver.ExecuteScript(script)
 	if err != nil {
-		fmt.Println("Error, failed to get graph data: ", err)
+		logging.Error().Err(err).Msgf("[%s] failed to get graph data", sourceName)
 		return err
 	}
 
 	rawDataString, ok := rawData.(string)
 	if !ok {
-		return fmt.Errorf("unexpected graph data %v of type %T", rawData, rawData)
+		logging.Error().Msgf("[%s] unexpected graph data %v of type %T", sourceName, rawData, rawData)
 	}
 
 	if err := utils.ParseGraphData(rawDataString, graphData); err != nil {
@@ -137,7 +140,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 
 			lineType, err := utils.GetLineType(val)
 			if err != nil {
-				fmt.Println("Error, failed to get line type: ", err)
+				logging.Error().Err(err).Msgf("[%s] failed to get line type", sourceName)
 			}
 			// t.currentVitalInfo.LineType = lineType
 			// t.vitalInfoChannel <- *t.currentVitalInfo
@@ -149,7 +152,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 		case "ユーザー評価":
 			rating, err := getCleanRating(val)
 			if err != nil {
-				fmt.Println("Error, failed to get clean rating: ", err)
+				logging.Error().Err(err).Msgf("[%s] failed to get clean rating", sourceName)
 			}
 			data.SiteInfo.UserRating = rating
 		case "アクセス数":
@@ -161,8 +164,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			cleanedAccessCount := re.ReplaceAllString(val, "")
 			accessCount, err := strconv.Atoi(cleanedAccessCount)
 			if err != nil {
-				fmt.Printf("CleanedAccessCount: %s\naccessedCount: %d", cleanedAccessCount, accessCount)
-				panic(fmt.Errorf("failed to parse access count: %v", err))
+				logging.Error().Err(err).Int("accessCount", accessCount).Str("cleanedValue", cleanedAccessCount).Msgf("[%s] failed to parse access count", sourceName)
 			}
 			data.SiteInfo.AccessCount = accessCount
 		case "迷惑電話度":
@@ -225,27 +227,35 @@ func (t *TelnaviSource) getUserCommentsContainer() (selenium.WebElement, error) 
 }
 
 func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, error) {
-	fmt.Printf("[telnavi] Starting GetData for number: %s\n", phoneNumber)
+	logging.Info().Msgf("[%s] starting search for number: %s", sourceName, phoneNumber)
 	data := providers.NewNumberDetails(phoneNumber)
 	// t.currentVitalInfo = &data.VitalInfo
 	data.Number = phoneNumber
 	phoneNumberInfoPageUrl := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)
 	fmt.Printf("[telnavi] Navigating to: %s\n", phoneNumberInfoPageUrl)
+	logging.Debug().Msgf("[%s] navigating to %s", sourceName, phoneNumberInfoPageUrl)
 
-	t.driver.GotoUrl(phoneNumberInfoPageUrl)
-	t.driver.LoadCookies(webdriver.TelnaviWebScrapingProvider)
+	if err := t.driver.GotoUrl(phoneNumberInfoPageUrl); err != nil {
+		gotoUrlFailedError := errors.New("failed to navitage to page")
+		return data, errors.Join(gotoUrlFailedError, err)
+	}
+	logging.Debug().Msgf("[%s] navigated to page", sourceName)
+	if err := t.driver.LoadCookies(webdriver.TelnaviWebScrapingProvider); err != nil {
+		loadCookiesFailedError := errors.New("failed to load cookies")
+		return data, errors.Join(loadCookiesFailedError, err)
+	}
 
-	fmt.Printf("[telnavi] Loaded page and cookies\n")
-	// FIXME: Hung here \/\/\/\/
+	logging.Debug().Msgf("[%s] loaded cookies", sourceName)
+
 	businessTableContainer, err := t.driver.FindElement("div.info_table:nth-child(1) > table > tbody:nth-child(1)")
 	if err != nil {
 		if strings.Contains(err.Error(), "no such element") {
-			fmt.Printf("[telnavi] No business table found, continuing...\n")
+			logging.Info().Msgf("[%s] no business information table found", sourceName)
 		} else {
 			return data, err
 		}
 	} else {
-		fmt.Printf("[telnavi] Found business table, processing...\n")
+		logging.Debug().Msgf("[%s] processing business information table", sourceName)
 		businessTableEntries, err := webdriver.GetTableInformation(t.driver, businessTableContainer, "th", "td")
 		if err != nil {
 			return data, err
@@ -253,30 +263,42 @@ func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, er
 		if err := t.getBusinessInfo(&data, businessTableEntries); err != nil {
 			return data, err
 		}
-		fmt.Printf("[telnavi] Business info processed\n")
 	}
 
-	fmt.Printf("[telnavi] Looking for phone number table...\n")
+	logging.Debug().Msgf("[%s] searching for phone number table", sourceName)
 
 	phoneNumberTableContainer, err := t.driver.FindElement("div.info_table:nth-child(2) > table > tbody")
-	if err == nil {
-		phoneNumberTableEntries, err := webdriver.GetTableInformation(t.driver, phoneNumberTableContainer, "th", "td")
+	if err != nil {
+		phoneNumberTableNotFoundError := errors.New("could not find phone number table")
+		screenshot, err := t.driver.GetScreenshot()
 		if err != nil {
-			return data, err
+			panic(err)
 		}
-		if err := t.getPhoneNumberInfo(&data, phoneNumberTableEntries); err != nil {
-			return data, err
+		if err := os.WriteFile("telnaviImage.png", screenshot, 0644); err != nil {
+			panic(err)
 		}
-		fmt.Printf("[telnavi] Phone number info processed\n")
-	} else {
-		fmt.Printf("[telnavi] Could not find phone number table: %v\n", err)
+		return data, errors.Join(phoneNumberTableNotFoundError, err)
 	}
 
-	comments, reviewCount := extractAllComments(t.driver, phoneNumberInfoPageUrl)
+	phoneNumberTableEntries, err := webdriver.GetTableInformation(t.driver, phoneNumberTableContainer, "th", "td")
+	if err != nil {
+		return data, err
+	}
+	if err := t.getPhoneNumberInfo(&data, phoneNumberTableEntries); err != nil {
+		return data, err
+	}
+
+	comments, reviewCount, err := extractAllComments(t.driver, phoneNumberInfoPageUrl)
+	if err != nil {
+		if strings.Contains(err.Error(), "Unable to locate element: div.kuchikomi_thread_content") {
+		} else {
+			return data, err
+		}
+	}
 	data.SiteInfo.ReviewCount = reviewCount
 	data.SiteInfo.Comments = comments
 
-	fmt.Printf("[telnavi] Getting graph data...\n")
+	logging.Debug().Msgf("[%s] getting graph data", sourceName)
 	var graphData []providers.GraphData
 	if err := t.getGraphData(&graphData); err != nil {
 		return data, err
@@ -297,12 +319,11 @@ func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, er
 	// t.currentVitalInfo.OverallFraudScore = overallFraudScore
 	// t.vitalInfoChannel <- *t.currentVitalInfo
 	data.VitalInfo.OverallFraudScore = overallFraudScore
-	fmt.Printf("[telnavi] Finished GetData successfully\n")
 	return data, nil
 }
 
 // extractAllComments extracts all comments for the given phone number page(s) using BatchExtractComments.
-func extractAllComments(driver *webdriver.WebDriverWrapper, phoneNumberInfoPageUrl string) ([]providers.Comment, int) {
+func extractAllComments(driver *webdriver.WebDriverWrapper, phoneNumberInfoPageUrl string) ([]providers.Comment, int, error) {
 	var allComments []providers.Comment
 	reviewCount := 0
 	processedPages := map[int]bool{}
@@ -313,8 +334,7 @@ func extractAllComments(driver *webdriver.WebDriverWrapper, phoneNumberInfoPageU
 
 	userCommentsContainer, err := driver.FindElement("div.kuchikomi_thread_content")
 	if err != nil {
-		logging.Warn().Err(err).Msg("Failed to find user comments container")
-		return nil, 0
+		return nil, 0, err
 	}
 
 	// Always try to extract comments from the current page (page 1)
@@ -409,5 +429,5 @@ func extractAllComments(driver *webdriver.WebDriverWrapper, phoneNumberInfoPageU
 		}
 		processedPages[pageNumber] = true
 	}
-	return allComments, reviewCount
+	return allComments, reviewCount, nil
 }

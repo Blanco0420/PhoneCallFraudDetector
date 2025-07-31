@@ -91,6 +91,14 @@ func (w *WebDriverWrapper) GotoUrl(url string) error {
 	// return fmt.Errorf("failed to navigate to URL %s after %d attempts", url, maxAttempts)
 }
 
+func (w *WebDriverWrapper) GetScreenshot() ([]byte, error) {
+	screenshot, err := w.driver.Screenshot()
+	if err != nil {
+		return nil, err
+	}
+	return screenshot, nil
+}
+
 func (w *WebDriverWrapper) EnterText(selector, text string) error {
 	elem, err := w.driver.FindElement(selenium.ByCSSSelector, selector)
 	if err != nil {
@@ -132,6 +140,9 @@ func (w *WebDriverWrapper) GetInnerText(containerElement selenium.WebElement, se
 	text, err := elem.Text()
 	if err != nil {
 		return nil, err
+	}
+	if text == "" {
+		return nil, nil
 	}
 	return &text, nil
 }

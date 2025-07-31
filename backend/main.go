@@ -141,11 +141,11 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 		wg.Add(1)
 
 		go func(srcName string, src providers.Source) {
-			//TODO: Actually do something with the channel
 			defer wg.Done()
-			fmt.Printf("[%s] calling getData\n", srcName)
 
-			// Create a channel to receive the result
+			logging.Info().Msgf("[%s] starting search", srcName)
+
+			//TODO: Actually do something with the channel
 			resultChan := make(chan struct {
 				data providers.NumberDetails
 				err  error
@@ -163,13 +163,13 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 			// Wait for result or timeout
 			result := <-resultChan
 			if result.err != nil {
-				fmt.Printf("[%s] error: %v\n", srcName, result.err)
+				logging.Error().Err(result.err).Msgf("[%s] error while searching for data", srcName)
 				return
 			}
 			mu.Lock()
 			(*data)[srcName] = result.data
 			mu.Unlock()
-			fmt.Printf("[%s] finished GetData and closed channel\n", srcName)
+			logging.Info().Msgf("[%s] finished searching for data", srcName)
 		}(localSourceName, localSource)
 	}
 
@@ -227,6 +227,9 @@ type Services struct {
 
 // initializeServices sets up all required services and providers
 func initializeServices() (*Services, error) {
+	logging.Info().Msg("Loading environment variables")
+	config.LoadEnv()
+
 	logging.Info().Msg("Starting camera service")
 	cs, err := webcamdetection.NewCameraService(0)
 	if err != nil {
@@ -247,9 +250,6 @@ func initializeServices() (*Services, error) {
 			logging.Fatal().Err(err).Msg("Failed to start websocket")
 		}
 	}()
-
-	logging.Info().Msg("Loading environment file")
-	config.LoadEnv()
 
 	logging.Info().Msg("Initializing database")
 	databaseDriver, err := databasedriver.InitializeDriver()
@@ -435,6 +435,7 @@ func mainLoop(services *Services) {
 
 	var (
 		startChan = make(chan webcamdetection.RoiData, 1)
+		stopChan  = make(chan struct{}, 1) // Channel to signal stop/pause
 	)
 
 	// Single goroutine that listens to WebSocket messages
@@ -443,31 +444,69 @@ func mainLoop(services *Services) {
 			switch msg.Command {
 			case "start":
 				logging.Info().Msg("Received 'start' command")
-				startChan <- msg.Payload // send to main loop
+				select {
+				case startChan <- msg.Payload:
+					logging.Info().Msg("Sent start payload to main loop.")
+				default:
+					logging.Warn().Msg("Start channel is busy or already running, skipping start command.")
+				}
 			case "stop":
 				logging.Info().Msg("Received 'stop' command")
-				// Optionally implement stop logic, e.g., canceling context
+				select {
+				case stopChan <- struct{}{}:
+					logging.Info().Msg("Sent stop signal to main loop.")
+				default:
+					logging.Warn().Msg("Stop channel is busy, already in a stopped state or stop signal pending.")
+				}
 			default:
 				logging.Error().Msgf("error on websocket command, unknown command: %s", msg.Command)
 			}
 		}
 	}()
 
+	// Variable to track the running state
+	isRunning := false
+	var currentPayload webcamdetection.RoiData // To store the last received payload
+
 	for {
-		logging.Info().Msg("Waiting for 'start' command from websocket...")
+		if !isRunning {
+			logging.Info().Msg("Waiting for 'start' command from websocket to begin continuous monitoring...")
+			// Wait here until we receive a payload from the 'start' command
+			payload := <-startChan
+			currentPayload = payload // Store the payload
+			isRunning = true
+			logging.Info().Msg("Received initial start payload. Starting continuous number monitoring...")
+		}
 
-		// Wait here until we receive a payload from the 'start' command
-		payload := <-startChan
+		// Use a select with a default case to allow continuous processing
+		// while still listening for stop commands.
+		select {
+		case <-stopChan:
+			// If a stop command is received, set isRunning to false and pause
+			isRunning = false
+			logging.Info().Msg("Operation paused. Will wait for a 'start' command to resume continuous monitoring.")
+			continue // Skip the rest of the loop iteration and go back to waiting for 'start'
+		default:
+			// If no stop command is received, continue with the monitoring process
+			// This block only executes if isRunning is true and no stop signal is present.
+			if !isRunning {
+				// This should ideally not be reached if the `if !isRunning` block handles the initial wait.
+				// Added as a safeguard.
+				continue
+			}
+		}
 
-		logging.Info().Msg("Received start payload, beginning number monitoring...")
-
-		num, err := monitorAndParseNumber(services.CameraService, payload)
+		// This part only runs if `isRunning` is true and no `stop` command was received.
+		num, err := monitorAndParseNumber(services.CameraService, currentPayload) // Use the stored payload
 		if err != nil {
 			if strings.Contains(err.Error(), "timed out reading number") {
 				logging.Warn().Msg("Timed out waiting for a valid number, retrying...")
 			} else {
 				logging.Error().Err(err).Msg("Error in monitoring/parsing number")
 			}
+			// In a continuous loop, you might want to consider a small delay here
+			// to prevent busy-looping on persistent errors.
+			time.Sleep(500 * time.Millisecond) // Example: wait half a second before retrying
 			continue
 		}
 
@@ -485,7 +524,10 @@ func mainLoop(services *Services) {
 		}
 
 		elapsed := time.Since(start)
-		logging.Info().Msgf("Finished. Time taken: %v", elapsed)
+		logging.Info().Msgf("Finished one cycle. Time taken: %v", elapsed)
+
+		// Small delay to prevent the loop from consuming 100% CPU if processing is very fast
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
