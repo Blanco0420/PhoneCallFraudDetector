@@ -6,6 +6,8 @@ RUN apt-get update
 
 RUN apt-get install -y \
   software-properties-common \
+  python3 \
+  python3-pip \
   git
 
 
@@ -47,6 +49,14 @@ RUN rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+
+COPY ./pythonBrowsing ./pythonBrowsing
+
+RUN python3 --version
+
+RUN python3 -m pip install -r /app/pythonBrowsing/requirements.txt
+RUN python3 -m pip install fastapi[standard]
+
 COPY ./go.mod .
 COPY ./go.sum .
 
@@ -55,13 +65,18 @@ RUN go mod download
 
 EXPOSE 8080
 
+COPY ./entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+ENTRYPOINT [ "/app/entrypoint.sh" ]
+
 # === === DEV === ===
 FROM base AS dev
 RUN go install github.com/go-delve/delve/cmd/dlv@latest
 RUN go install github.com/air-verse/air@latest
 
-
 EXPOSE 40000
+
 CMD [ "air", "-c", ".air.toml" ]
 
 # === === PROD === ===
@@ -69,4 +84,6 @@ FROM base AS prod
 
 COPY . .
 RUN go build -o backend
-CMD ["./backend"]
+RUN chmod +x /app/backend
+
+CMD [ "/app/backend" ]
