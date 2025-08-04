@@ -189,7 +189,7 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails) error {
 
 			switch key {
 			case "Name", "事業者名称":
-				cleanName, suffixes := utils.GetSuffixesFromCompanyName(&value)
+				cleanName, suffixes := utils.GetSuffixesFromCompanyName(value)
 				data.BusinessDetails.NameSuffixes = suffixes
 				data.VitalInfo.Name = &cleanName
 				// s.currentVitalInfo.Name = cleanName
@@ -197,15 +197,15 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails) error {
 			case "Industry", "業種":
 				// s.currentVitalInfo.Industry = value
 				// s.vitalInfoChannel <- *s.currentVitalInfo
-				data.VitalInfo.Industry = &value
+				data.VitalInfo.Industry = value
 			case "Address", "住所":
-				japaneseinfo.GetAddressInfo(value, data.BusinessDetails.LocationDetails)
+				japaneseinfo.GetAddressInfo(*value, data.BusinessDetails.LocationDetails)
 			case "Official website", "公式サイト":
-				data.BusinessDetails.Website = &value
+				data.BusinessDetails.Website = value
 			case "Business", "事業紹介":
 				// s.currentVitalInfo.CompanyOverview = value
 				// s.vitalInfoChannel <- *s.currentVitalInfo
-				data.VitalInfo.CompanyOverview = &value
+				data.VitalInfo.CompanyOverview = value
 			}
 		}
 	}

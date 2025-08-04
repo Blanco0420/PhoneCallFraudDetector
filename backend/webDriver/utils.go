@@ -41,9 +41,11 @@ func GetTableInformation(d *WebDriverWrapper, tableBodyElement selenium.WebEleme
 		}
 		//Clean text
 		*key = utils.CleanText(*key)
-		*value = utils.CleanText(*value)
+		if value != nil {
+			*value = utils.CleanText(*value)
+		}
 
-		tableEntries = append(tableEntries, providers.TableEntry{Key: *key, Value: *value, Element: element})
+		tableEntries = append(tableEntries, providers.TableEntry{Key: *key, Value: value, Element: element})
 	}
 	return tableEntries, nil
 }

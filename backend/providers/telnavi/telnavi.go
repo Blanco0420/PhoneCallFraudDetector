@@ -116,11 +116,14 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 	for _, entry := range tableEntries {
 		key := entry.Key
 		val := entry.Value
+		if val == nil {
+			continue
+		}
 		switch key {
 		case "事業者名":
 			// if t.currentVitalInfo.Name == "" {
 			if data.VitalInfo.Name == nil {
-				cleanName, suffixes := extractBusinessName(&val)
+				cleanName, suffixes := extractBusinessName(val)
 
 				data.BusinessDetails.NameSuffixes = suffixes
 				// t.currentVitalInfo.Name = cleanName
@@ -129,7 +132,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			}
 		case "住所":
 			if data.BusinessDetails.LocationDetails == (&providers.LocationDetails{}) {
-				if err := japaneseinfo.GetAddressInfo(val, data.BusinessDetails.LocationDetails); err != nil {
+				if err := japaneseinfo.GetAddressInfo(*val, data.BusinessDetails.LocationDetails); err != nil {
 					data.BusinessDetails.LocationDetails = &providers.LocationDetails{
 						Prefecture: nil,
 					}
@@ -138,7 +141,7 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			}
 		case "回線種別":
 
-			lineType, err := utils.GetLineType(val)
+			lineType, err := utils.GetLineType(*val)
 			if err != nil {
 				logging.Error().Err(err).Msgf("[%s] failed to get line type", sourceName)
 			}
@@ -148,20 +151,20 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 		case "業種タグ":
 			// t.currentVitalInfo.Industry = val
 			// t.vitalInfoChannel <- *t.currentVitalInfo
-			data.VitalInfo.Industry = &val
+			data.VitalInfo.Industry = val
 		case "ユーザー評価":
-			rating, err := getCleanRating(val)
+			rating, err := getCleanRating(*val)
 			if err != nil {
 				logging.Error().Err(err).Msgf("[%s] failed to get clean rating", sourceName)
 			}
 			data.SiteInfo.UserRating = rating
 		case "アクセス数":
-			val = strings.TrimSpace(val)
-			if val == "10回未満" {
+			*val = strings.TrimSpace(*val)
+			if *val == "10回未満" {
 
 			}
 			re := regexp.MustCompile(`[^0-9]`)
-			cleanedAccessCount := re.ReplaceAllString(val, "")
+			cleanedAccessCount := re.ReplaceAllString(*val, "")
 			accessCount, err := strconv.Atoi(cleanedAccessCount)
 			if err != nil {
 				logging.Error().Err(err).Int("accessCount", accessCount).Str("cleanedValue", cleanedAccessCount).Msgf("[%s] failed to parse access count", sourceName)
@@ -202,13 +205,13 @@ func (t *TelnaviSource) getBusinessInfo(data *providers.NumberDetails, businessT
 
 		switch key {
 		case "事業者名":
-			cleanedName, suffixes := extractBusinessName(&val)
+			cleanedName, suffixes := extractBusinessName(val)
 			data.BusinessDetails.NameSuffixes = suffixes
 			// t.currentVitalInfo.Name = cleanedName
 			// t.vitalInfoChannel <- *t.currentVitalInfo
 			data.VitalInfo.Name = &cleanedName
 		case "住所":
-			if err := japaneseinfo.GetAddressInfo(val, data.BusinessDetails.LocationDetails); err != nil {
+			if err := japaneseinfo.GetAddressInfo(*val, data.BusinessDetails.LocationDetails); err != nil {
 				continue
 			}
 		}

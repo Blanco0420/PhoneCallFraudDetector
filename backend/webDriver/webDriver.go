@@ -58,7 +58,7 @@ func InitializeDriver(providerName WebScrapingProvider) (*WebDriverWrapper, erro
 func (w *WebDriverWrapper) GotoUrl(url string) error {
 	// const maxAttempts = 3
 	// const retryDelay = 5 * time.Second
-	return w.driver.Get(url)
+	return w.driver.Get(fmt.Sprintf("http://localhost:8000/getNumberPage?url=%s", url))
 	// for attempt := 1; attempt <= maxAttempts; {
 	// 	status, err := getStatusCode(url)
 	// 	if err != nil {

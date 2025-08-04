@@ -9,7 +9,7 @@ import (
 
 type TableEntry struct {
 	Key     string
-	Value   string
+	Value   *string
 	Element selenium.WebElement
 }
 

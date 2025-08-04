@@ -467,6 +467,7 @@ func mainLoop(services *Services) {
 	// Variable to track the running state
 	isRunning := false
 	var currentPayload webcamdetection.RoiData // To store the last received payload
+	var lastNumber string
 
 	for {
 		if !isRunning {
@@ -510,17 +511,20 @@ func mainLoop(services *Services) {
 			continue
 		}
 
-		fmt.Println("Valid number detected:", num)
-
 		data := make(map[string]providers.NumberDetails)
+		//TODO: Add logic to check if x amount of time has passed. If so, check the number again. (Maybe separate functions so that only the database is checked as it will be in there as fraud or not fraud.)
+		if num == lastNumber {
+			continue
+		}
 		start := time.Now()
 		finalFraudScore, err := processNumber(num, &data, services.Sources)
+		// finalFraudScore, err := processNumber(num, &data, services.Sources)
 		if err != nil {
 			logging.Error().Err(err).Msg("Error processing number")
 			continue
 		}
 		if err := services.DatabaseDriver.InsertNumberIntoDatabase(ctx, data, finalFraudScore); err != nil {
-			fmt.Println(err)
+			logging.Error().Err(err).Msgf("failed to insert number %s into database", num)
 		}
 
 		elapsed := time.Since(start)

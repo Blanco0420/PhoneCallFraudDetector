@@ -76,12 +76,13 @@ func InitializeDriver() (*DatabaseDriver, error) {
 	return &DatabaseDriver{client: client}, nil
 }
 
-func getCommentBuilders(tx *ent.Tx, comments []providers.Comment) []*ent.CommentCreate {
+func getCommentBuilders(tx *ent.Tx, provider *ent.Provider, comments []providers.Comment) []*ent.CommentCreate {
 	builders := make([]*ent.CommentCreate, 0, len(comments))
 	for _, comment := range comments {
 		builder := tx.Comment.Create().
 			SetCommentText(comment.Text).
-			SetPostDate(comment.PostDate)
+			SetPostDate(comment.PostDate).
+			SetProvider(provider)
 		builders = append(builders, builder)
 	}
 
@@ -293,7 +294,7 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 		// Always create new Address
 
 		// Bulk insert Comments
-		commentBuilders := getCommentBuilders(tx, details.SiteInfo.Comments)
+		commentBuilders := getCommentBuilders(tx, provider, details.SiteInfo.Comments)
 		if _, err := tx.Comment.CreateBulk(commentBuilders...).Save(ctx); err != nil {
 			return err
 		}

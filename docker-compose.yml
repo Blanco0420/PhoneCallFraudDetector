@@ -5,6 +5,9 @@ services:
       target: ${PHRAUD__APP_ENV:-prod}
     image: number-backend:1.0.0
     container_name: number-backend
+    #FIXME: TESTING
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /tmp/.X11-unix/:/tmp/.X11-unix/:rw
       - ./backend:/app
@@ -55,8 +58,6 @@ services:
     container_name: number-frontend
     environment:
       - PHRAUD__APP_ENV
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./frontend:/app
     networks:
