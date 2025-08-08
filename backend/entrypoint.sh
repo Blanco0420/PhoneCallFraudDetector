@@ -2,6 +2,6 @@
 
 set -e
 
-fastapi run /app/pythonBrowsing/pythonBrowsingApi.py --host 127.0.0.1 &
-
+cd /app/pythonBrowsing; uv run uvicorn main:app --port 8000 --host 127.0.0.1 &
+cd /app
 exec "$@" 

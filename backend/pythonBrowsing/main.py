@@ -2,6 +2,7 @@ import cloudscraper
 from fastapi import FastAPI, Response
 from fastapi.responses import HTMLResponse
 
+
 app = FastAPI()
 
 scraper = cloudscraper.create_scraper()

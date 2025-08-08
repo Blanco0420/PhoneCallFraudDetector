@@ -6,10 +6,7 @@ RUN apt-get update
 
 RUN apt-get install -y \
   software-properties-common \
-  python3 \
-  python3-pip \
   git
-
 
 
 # === Install libpostal ===
@@ -50,12 +47,14 @@ RUN rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
 
+
+# === Install python tool (uv) ===
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 COPY ./pythonBrowsing ./pythonBrowsing
-
-RUN python3 --version
-
-RUN python3 -m pip install -r /app/pythonBrowsing/requirements.txt
-RUN python3 -m pip install fastapi[standard]
+WORKDIR /app/pythonBrowsing
+RUN uv sync --locked
+WORKDIR /app
 
 COPY ./go.mod .
 COPY ./go.sum .
