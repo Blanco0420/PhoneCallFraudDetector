@@ -3,36 +3,56 @@ package backendwebsocket
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/Blanco0420/Phone-Number-Check/backend/config"
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
+	"github.com/Blanco0420/Phone-Number-Check/backend/providers"
 	webcamdetection "github.com/Blanco0420/Phone-Number-Check/backend/webcamDetection"
 	"github.com/gorilla/websocket"
 	"gocv.io/x/gocv"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		if config.IsDev {
-			return true
-		} else {
-			return false
-		}
-	},
+type clientType struct {
+	conn  *websocket.Conn
+	mutex sync.Mutex
 }
 
-func sendToClients(data string, ws *websocket.Conn) error {
-	if err := ws.WriteMessage(websocket.TextMessage, []byte(data)); err != nil {
-		return fmt.Errorf("error sending message to client/s: %v", err)
+var (
+	upgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			if config.IsDev {
+				return true
+			} else {
+				return false
+			}
+		},
 	}
+	clients      = make(map[*clientType]struct{})
+	clientsMutex sync.RWMutex
+)
 
+func SendToClients(data WebsocketMessage) error {
+	clientsMutex.Lock()
+	for client := range clients {
+		if err := client.sendMessage(data); err != nil {
+			client.conn.Close()
+			delete(clients, client)
+		}
+	}
+	clientsMutex.Unlock()
 	return nil
 }
 
-func sendFrames(ws *websocket.Conn, cs *webcamdetection.CameraService) error {
+func (client *clientType) sendMessage(data any) error {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	return client.conn.WriteJSON(data)
+}
+
+func sendFrames(cs *webcamdetection.CameraService) error {
 	frame := gocv.NewMat()
 	if err := cs.GetFrame(&frame); err != nil {
 		return err
@@ -44,15 +64,23 @@ func sendFrames(ws *websocket.Conn, cs *webcamdetection.CameraService) error {
 	frame.Close()
 	base64Img := base64.StdEncoding.EncodeToString(buf.GetBytes())
 	buf.Close()
-	if err := sendToClients(base64Img, ws); err != nil {
-		return err
+	websocketMessage := WebsocketMessage{
+		Command: "currentData",
+		Payload: WebsocketCurrentData{
+			VideoFeed: base64Img,
+		},
 	}
-	return nil
+	return SendToClients(websocketMessage)
+}
+
+type WebsocketCurrentData struct {
+	VideoFeed string
+	VitalInfo providers.VitalInfo
 }
 
 type WebsocketMessage struct {
 	Command string
-	Payload webcamdetection.RoiData
+	Payload interface{}
 }
 
 func wsHandler(websocketMessageChannel chan WebsocketMessage, cs *webcamdetection.CameraService) http.HandlerFunc {
@@ -62,10 +90,19 @@ func wsHandler(websocketMessageChannel chan WebsocketMessage, cs *webcamdetectio
 			logging.Error().Err(err).Msg("failed to upgrade on websocket")
 			return
 		}
-		defer ws.Close()
 		logging.Info().Msg("Client connected")
+		client := &clientType{
+			conn:  ws,
+			mutex: sync.Mutex{},
+		}
+		clientsMutex.Lock()
+		clients[client] = struct{}{}
+		clientsMutex.Unlock()
+
+		done := make(chan struct{})
 
 		go func() {
+			defer close(done)
 			for {
 				messageType, data, err := ws.ReadMessage()
 				if err != nil {
@@ -84,17 +121,12 @@ func wsHandler(websocketMessageChannel chan WebsocketMessage, cs *webcamdetectio
 			}
 		}()
 
-		for {
-			// ws.WriteMessage(websocket.TextMessage, []byte("Yeet"))
-			if err := sendFrames(ws, cs); err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					break
-				}
-				logging.Error().Err(err).Msg("Failed to send frames to client")
-				break
-			}
-			time.Sleep(33 * time.Millisecond)
-		}
+		<-done
+		ws.Close()
+		clientsMutex.Lock()
+		delete(clients, client)
+		clientsMutex.Unlock()
+
 	}
 }
 
@@ -106,11 +138,23 @@ func wsHandler(websocketMessageChannel chan WebsocketMessage, cs *webcamdetectio
 // }
 
 func SetupWebsocket(websocketMessageChannel chan WebsocketMessage, cs *webcamdetection.CameraService) error {
+	go func() {
+
+		for {
+			if err := sendFrames(cs); err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					break
+				}
+				logging.Error().Err(err).Msg("Failed to send frames to client")
+				break
+			}
+			time.Sleep(33 * time.Millisecond)
+		}
+	}()
 	http.HandleFunc("/ws", wsHandler(websocketMessageChannel, cs))
 	// http.HandleFunc("/ping", ping)
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		return err
 	}
-	logging.Info().Msg("Websocket server started on :8080")
 	return nil
 }

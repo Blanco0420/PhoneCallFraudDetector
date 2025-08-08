@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"runtime"
@@ -443,9 +444,23 @@ func mainLoop(services *Services) {
 		for msg := range services.WebsocketChannel {
 			switch msg.Command {
 			case "start":
-				logging.Info().Msg("Received 'start' command")
+				rawMap, ok := msg.Payload.(map[string]interface{})
+				if !ok {
+					logging.Error().Msgf("Error, invalid ROI data received: %v", msg.Payload)
+					continue
+				}
+				rawJson, err := json.Marshal(rawMap)
+				if err != nil {
+					logging.Error().Err(err).Msg("failed to marshall data")
+				}
+				var roiData webcamdetection.RoiData
+				if err := json.Unmarshal(rawJson, &roiData); err != nil {
+					logging.Error().Err(err).Msg("failed to unmarshal websocket data")
+					continue
+				}
+
 				select {
-				case startChan <- msg.Payload:
+				case startChan <- roiData:
 					logging.Info().Msg("Sent start payload to main loop.")
 				default:
 					logging.Warn().Msg("Start channel is busy or already running, skipping start command.")

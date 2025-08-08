@@ -53,8 +53,7 @@ type VitalInfo struct {
 }
 
 type NumberDetails struct {
-	Number string
-	//TODO: Change to enum? (like LineType)
+	Number          string
 	Carrier         *string
 	VitalInfo       VitalInfo
 	BusinessDetails *BusinessDetails
@@ -63,7 +62,8 @@ type NumberDetails struct {
 
 func NewNumberDetails(number string) NumberDetails {
 	return NumberDetails{
-		Number: number,
+		Number:    number,
+		VitalInfo: VitalInfo{},
 		BusinessDetails: &BusinessDetails{
 			LocationDetails: &LocationDetails{},
 		},
