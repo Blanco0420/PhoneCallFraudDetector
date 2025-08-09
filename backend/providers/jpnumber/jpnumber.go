@@ -30,18 +30,9 @@ const (
 //TODO: Search for the city in the businessDetails Address (for each (rune?token?) check if exists in japaneseInfo)
 
 type JpNumberSource struct {
-	driver *webdriver.WebDriverWrapper
-	// vitalInfoChannel chan providers.VitalInfo
-	// currentVitalInfo *providers.VitalInfo
+	driver           *webdriver.WebDriverWrapper
+	VitalInfoChannel chan providers.VitalInfo
 }
-
-// func (s *JpNumberSource) VitalInfoChannel() <-chan providers.VitalInfo {
-// 	return s.vitalInfoChannel
-// }
-//
-// func (s *JpNumberSource) CloseVitalInfoChannel() {
-// 	close(s.vitalInfoChannel)
-// }
 
 func Initialize() (*JpNumberSource, error) {
 	driver, err := webdriver.InitializeDriver(webdriver.JpNumberWebScrapingProvider)
@@ -49,13 +40,14 @@ func Initialize() (*JpNumberSource, error) {
 		return &JpNumberSource{}, err
 	}
 	return &JpNumberSource{
-		driver: driver,
-		// vitalInfoChannel: make(chan providers.VitalInfo),
+		driver:           driver,
+		VitalInfoChannel: providers.CreateVitalInfoChannel(),
 	}, nil
 }
 
 func (s *JpNumberSource) Close() {
 	s.driver.Close()
+	close(s.VitalInfoChannel)
 }
 
 func (s *JpNumberSource) getGraphData(graphData *[]providers.GraphData) error {
@@ -162,9 +154,6 @@ func (s *JpNumberSource) getComments() ([]providers.Comment, error) {
 // }
 
 func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails) error {
-	if data.BusinessDetails == nil {
-		data.BusinessDetails = &providers.BusinessDetails{}
-	}
 	businessInfoTableContainer, err := s.driver.FindElement("div.frame-728-green-l:nth-child(4)")
 	if err != nil {
 		return fmt.Errorf("no business details available")
@@ -192,20 +181,17 @@ func (s *JpNumberSource) getBusinessInfo(data *providers.NumberDetails) error {
 				cleanName, suffixes := utils.GetSuffixesFromCompanyName(value)
 				data.BusinessDetails.NameSuffixes = suffixes
 				data.VitalInfo.Name = &cleanName
-				// s.currentVitalInfo.Name = cleanName
-				// s.vitalInfoChannel <- *s.currentVitalInfo
+				s.VitalInfoChannel <- data.VitalInfo
 			case "Industry", "業種":
-				// s.currentVitalInfo.Industry = value
-				// s.vitalInfoChannel <- *s.currentVitalInfo
 				data.VitalInfo.Industry = value
+				s.VitalInfoChannel <- data.VitalInfo
 			case "Address", "住所":
 				japaneseinfo.GetAddressInfo(*value, data.BusinessDetails.LocationDetails)
 			case "Official website", "公式サイト":
 				data.BusinessDetails.Website = value
 			case "Business", "事業紹介":
-				// s.currentVitalInfo.CompanyOverview = value
-				// s.vitalInfoChannel <- *s.currentVitalInfo
 				data.VitalInfo.CompanyOverview = value
+				s.VitalInfoChannel <- data.VitalInfo
 			}
 		}
 	}
@@ -245,9 +231,8 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	if err != nil {
 		return data, err
 	}
-	// s.currentVitalInfo.LineType = lineType
-	// s.vitalInfoChannel <- *s.currentVitalInfo
 	data.VitalInfo.LineType = lineType
+	s.VitalInfoChannel <- data.VitalInfo
 
 	// goto detailed page
 	detailesPagesUrl, err := s.getDetailsPageURL(lineType, number)
@@ -270,9 +255,6 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 		return data, err
 	}
 	//TODO: Move somehwere else
-	if data.BusinessDetails.LocationDetails == nil {
-		data.BusinessDetails.LocationDetails = &providers.LocationDetails{}
-	}
 	prefecture, _ := s.driver.GetInnerText(phoneNumberInfoContainer, "tr:nth-child(4)>td:nth-child(2)")
 	data.BusinessDetails.LocationDetails.Prefecture = prefecture
 
@@ -317,9 +299,8 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 			logging.Error().Err(err).Msg("Failed to save cookies for jpnumber provider")
 		}
 	}()
-	// s.currentVitalInfo.OverallFraudScore = providerdataprocessing.EvaluateSource(numberRiskInput)
-	// s.vitalInfoChannel <- *s.currentVitalInfo
 	data.VitalInfo.OverallFraudScore = providerdataprocessing.EvaluateSource(numberRiskInput)
+	s.VitalInfoChannel <- data.VitalInfo
 
 	return data, nil
 }

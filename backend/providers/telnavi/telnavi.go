@@ -3,7 +3,6 @@ package telnavi
 import (
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,18 +26,10 @@ const (
 )
 
 type TelnaviSource struct {
-	driver *webdriver.WebDriverWrapper
-	// vitalInfoChannel chan providers.VitalInfo
+	driver           *webdriver.WebDriverWrapper
+	VitalInfoChannel chan providers.VitalInfo
 	// currentVitalInfo *providers.VitalInfo
 }
-
-// func (t *TelnaviSource) VitalInfoChannel() <-chan providers.VitalInfo {
-// 	return t.vitalInfoChannel
-// }
-//
-// func (t *TelnaviSource) CloseVitalInfoChannel() {
-// 	close(t.vitalInfoChannel)
-// }
 
 func Initialize() (*TelnaviSource, error) {
 	driver, err := webdriver.InitializeDriver(webdriver.TelnaviWebScrapingProvider)
@@ -46,13 +37,14 @@ func Initialize() (*TelnaviSource, error) {
 		return &TelnaviSource{}, err
 	}
 	return &TelnaviSource{
-		driver: driver,
-		// vitalInfoChannel: make(chan providers.VitalInfo),
+		driver:           driver,
+		VitalInfoChannel: providers.CreateVitalInfoChannel(),
 	}, nil
 }
 
 func (t *TelnaviSource) Close() {
 	t.driver.Close()
+	close(t.VitalInfoChannel)
 }
 
 func (t *TelnaviSource) calculateFraudScore(ratingTableContainer selenium.WebElement) (int, error) {
@@ -121,14 +113,13 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 		}
 		switch key {
 		case "事業者名":
-			// if t.currentVitalInfo.Name == "" {
-			if data.VitalInfo.Name == nil {
+			if data.VitalInfo.Name == nil || *data.VitalInfo.Name == "" {
+				// if data.VitalInfo.Name == nil {
 				cleanName, suffixes := extractBusinessName(val)
 
 				data.BusinessDetails.NameSuffixes = suffixes
-				// t.currentVitalInfo.Name = cleanName
-				// t.vitalInfoChannel <- *t.currentVitalInfo
 				data.VitalInfo.Name = &cleanName
+				t.VitalInfoChannel <- data.VitalInfo
 			}
 		case "住所":
 			if data.BusinessDetails.LocationDetails == (&providers.LocationDetails{}) {
@@ -145,13 +136,11 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			if err != nil {
 				logging.Error().Err(err).Msgf("[%s] failed to get line type", sourceName)
 			}
-			// t.currentVitalInfo.LineType = lineType
-			// t.vitalInfoChannel <- *t.currentVitalInfo
 			data.VitalInfo.LineType = lineType
+			t.VitalInfoChannel <- data.VitalInfo
 		case "業種タグ":
-			// t.currentVitalInfo.Industry = val
-			// t.vitalInfoChannel <- *t.currentVitalInfo
 			data.VitalInfo.Industry = val
+			t.VitalInfoChannel <- data.VitalInfo
 		case "ユーザー評価":
 			rating, err := getCleanRating(*val)
 			if err != nil {
@@ -175,16 +164,14 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			fraudScore, err := t.calculateFraudScore(entry.Element)
 			if err != nil {
 				if strings.Contains(err.Error(), "no such element") {
-					// t.currentVitalInfo.FraudulentDetails.FraudScore = 0
-					// t.vitalInfoChannel <- *t.currentVitalInfo
 					data.VitalInfo.FraudulentDetails.FraudScore = 0
+					t.VitalInfoChannel <- data.VitalInfo
 				} else {
 					return err
 				}
 			} else {
-				// t.currentVitalInfo.FraudulentDetails.FraudScore = fraudScore
-				// t.vitalInfoChannel <- *t.currentVitalInfo
 				data.VitalInfo.FraudulentDetails.FraudScore = fraudScore
+				t.VitalInfoChannel <- data.VitalInfo
 			}
 		default:
 			continue
@@ -207,9 +194,8 @@ func (t *TelnaviSource) getBusinessInfo(data *providers.NumberDetails, businessT
 		case "事業者名":
 			cleanedName, suffixes := extractBusinessName(val)
 			data.BusinessDetails.NameSuffixes = suffixes
-			// t.currentVitalInfo.Name = cleanedName
-			// t.vitalInfoChannel <- *t.currentVitalInfo
 			data.VitalInfo.Name = &cleanedName
+			t.VitalInfoChannel <- data.VitalInfo
 		case "住所":
 			if err := japaneseinfo.GetAddressInfo(*val, data.BusinessDetails.LocationDetails); err != nil {
 				continue
@@ -232,7 +218,6 @@ func (t *TelnaviSource) getUserCommentsContainer() (selenium.WebElement, error) 
 func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, error) {
 	logging.Info().Msgf("[%s] starting search for number: %s", sourceName, phoneNumber)
 	data := providers.NewNumberDetails(phoneNumber)
-	// t.currentVitalInfo = &data.VitalInfo
 	data.Number = phoneNumber
 	phoneNumberInfoPageUrl := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)
 	fmt.Printf("[telnavi] Navigating to: %s\n", phoneNumberInfoPageUrl)
@@ -273,13 +258,6 @@ func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, er
 	phoneNumberTableContainer, err := t.driver.FindElement("div.info_table:nth-child(2) > table > tbody")
 	if err != nil {
 		phoneNumberTableNotFoundError := errors.New("could not find phone number table")
-		screenshot, err := t.driver.GetScreenshot()
-		if err != nil {
-			panic(err)
-		}
-		if err := os.WriteFile("telnaviImage.png", screenshot, 0644); err != nil {
-			panic(err)
-		}
 		return data, errors.Join(phoneNumberTableNotFoundError, err)
 	}
 
@@ -319,9 +297,8 @@ func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, er
 		}
 	}()
 	overallFraudScore := providerdataprocessing.EvaluateSource(numberRiskInput)
-	// t.currentVitalInfo.OverallFraudScore = overallFraudScore
-	// t.vitalInfoChannel <- *t.currentVitalInfo
 	data.VitalInfo.OverallFraudScore = overallFraudScore
+	t.VitalInfoChannel <- data.VitalInfo
 	return data, nil
 }
 

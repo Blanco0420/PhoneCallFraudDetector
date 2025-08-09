@@ -15,6 +15,15 @@ func NewApiConfig(apiKey, baseUrl string) *APIConfig {
 	}
 }
 
+func CreateVitalInfoChannel() chan VitalInfo {
+	return make(chan VitalInfo)
+}
+
+func CloseVitalInfoChannel(channel chan VitalInfo) {
+	close(channel)
+}
+
 type Source interface {
 	GetData(phoneNumber string) (NumberDetails, error)
+	Close()
 }
