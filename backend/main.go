@@ -4,23 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	backendwebsocket "github.com/Blanco0420/Phone-Number-Check/backend/backendWebSocket"
-	"github.com/Blanco0420/Phone-Number-Check/backend/config"
-	databasedriver "github.com/Blanco0420/Phone-Number-Check/backend/databaseDriver"
 	japanesetokenizing "github.com/Blanco0420/Phone-Number-Check/backend/japaneseTokenizing"
 	"github.com/Blanco0420/Phone-Number-Check/backend/logging"
-	"github.com/Blanco0420/Phone-Number-Check/backend/profanityAnalyzing"
 	providerdataprocessing "github.com/Blanco0420/Phone-Number-Check/backend/providerDataProcessing"
 	"github.com/Blanco0420/Phone-Number-Check/backend/providers"
-	"github.com/Blanco0420/Phone-Number-Check/backend/providers/jpnumber"
-	"github.com/Blanco0420/Phone-Number-Check/backend/providers/telnavi"
+	"github.com/Blanco0420/Phone-Number-Check/backend/services"
 	"github.com/Blanco0420/Phone-Number-Check/backend/utils"
 
 	webcamdetection "github.com/Blanco0420/Phone-Number-Check/backend/webcamDetection"
@@ -120,24 +114,6 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	// UI goroutine to refresh screen
-	// go func() {
-	// 	for {
-	// 		// time.Sleep(500 * time.Millisecond)
-	// 		// fmt.Print("\033[H\033[2J") // Clear screen
-	// 		// fmt.Println("Live Source Output:")
-	// 		// fmt.Println("====================")
-	// 		// outputsMu.Lock()
-	// 		// for _, name := range orderedSourceNames {
-	// 		// 	if out, ok := outputs[name]; ok {
-	// 		// 		fmt.Printf("--- %s ---\n%s\n\n", name, out)
-	// 		// 	} else {
-	// 		// 		fmt.Printf("--- %s ---\n(waiting for data...)\n\n", name)
-	// 		// 	}
-	// 		// }
-	// 		// outputsMu.Unlock()
-	// 	}
-	// }()
 	for localSourceName, localSource := range sources {
 		wg.Add(1)
 
@@ -177,180 +153,6 @@ func callProviders(number string, data *map[string]providers.NumberDetails, sour
 	wg.Wait()
 	return nil
 }
-
-// func startNumberProcessing(number) {
-// Optionally print results for each run:
-// printFinalDisplayData(finalData)
-// // for key, val := range data {
-// // 	json, err := json.MarshalIndent(val, "", "  ")
-// // 	if err != nil {
-// // 		panic(err)
-// // 	}
-// // }
-// localData, err := json.MarshalIndent(data, "", "  ")
-// if err != nil {
-// 	panic(err)
-// }
-// file, err := os.OpenFile("output.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-// if err != nil {
-// 	panic(err)
-// }
-// defer file.Close()
-// _, err = file.WriteString("\n")
-// if err != nil {
-// 	panic(err)
-// }
-// _, err = file.Write(localData)
-// if err != nil {
-// 	panic(err)
-// }
-
-// numberChan := make(chan string)
-// stopChan := make(chan struct{})
-// go webcamdetection.StartOCRScanner(numberChan, stopChan)
-
-// ipqsSource, err := ipqualityscore.Initialize()
-// if err != nil {
-// 	panic(err)
-// }
-
-// pref, exists := japaneseinfo.FindPrefectureByCityName("台東区", 1)
-// fmt.Println(pref, exists)
-
-// }
-
-type Services struct {
-	CameraService    *webcamdetection.CameraService
-	WebsocketChannel chan backendwebsocket.WebsocketMessage
-	Sources          map[string]providers.Source
-	DatabaseDriver   *databasedriver.DatabaseDriver
-}
-
-// initializeServices sets up all required services and providers
-func initializeServices() (*Services, error) {
-	logging.Info().Msg("Loading environment variables")
-	config.LoadEnv()
-
-	logging.Info().Msg("Starting camera service")
-	cs, err := webcamdetection.NewCameraService(0)
-	if err != nil {
-		return nil, err
-	}
-
-	// go func() {
-	// 	if err := backendapi.StartBackendApi(roiChan, cs); err != nil {
-	// 		logging.Fatal().Err(err).Msg("Failed to start backend api service")
-	// 		os.Exit(1)
-	// 	}
-	// }()
-	logging.Info().Msg("Initating websocket")
-	websocketMessageChannel := make(chan backendwebsocket.WebsocketMessage)
-	go func() {
-		err := backendwebsocket.SetupWebsocket(websocketMessageChannel, cs)
-		if err != nil {
-			logging.Fatal().Err(err).Msg("Failed to start websocket")
-		}
-	}()
-
-	logging.Info().Msg("Initializing database")
-	databaseDriver, err := databasedriver.InitializeDriver()
-	if err != nil {
-		return nil, err
-	}
-
-	logging.Info().Msg("Initalizing profanity lists")
-	if err := profanityAnalyzing.Initialize(); err != nil {
-		logging.Fatal().Err(err).Msg("Failed to initialize profanity lists")
-		os.Exit(2)
-	}
-	// TODO: Send error here
-	// jpNumberProvider := jpnumber.Initialize(driver)
-
-	// numverify, err := numverify.Initialize()
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	jpNumber, err := jpnumber.Initialize()
-	if err != nil {
-		return nil, err
-	}
-	// Clean up jpNumber on panic
-	go func() {
-		if r := recover(); r != nil {
-			jpNumber.Close()
-			panic(r)
-		}
-	}()
-
-	// ipqsSource, err := ipqualityscore.Initialize()
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	telnavi, err := telnavi.Initialize()
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		if r := recover(); r != nil {
-			telnavi.Close()
-			panic(r)
-		}
-	}()
-
-	sources := map[string]providers.Source{
-		"jpNumber": jpNumber,
-		// ipqsSource,
-		// numverify,
-		"telnavi": telnavi,
-	}
-
-	return &Services{
-		CameraService:    cs,
-		WebsocketChannel: websocketMessageChannel,
-		Sources:          sources,
-		DatabaseDriver:   databaseDriver,
-	}, nil
-}
-
-// monitorAndParseNumber continuously monitors the ROI and returns a valid number
-// func monitorAndParseNumber(cs *webcamdetection.CameraService, roiChan chan webcamdetection.RoiData) (string, error) {
-// 	for {
-// 		roi := <-roiChan
-// 		numberChan := make(chan struct {
-// 			string
-// 			error
-// 		})
-// 		go func() {
-// 			for {
-
-// 				num, err := cs.MonitorCamera(roi)
-// 				if err != nil {
-// 					if strings.Contains(err.Error(), "phone number supplied is not a number") {
-// 						logging.Error().Err(err).Msgf("Failed to read phone number. Text: %s", num)
-// 						continue
-// 					} else {
-// 						logging.Error().Err(err).Msgf("Error monitoring camera")
-// 						continue // Try again
-// 					}
-// 				}
-// 				if num != "" && num != "<nil>" {
-// 					numberChan <- struct {
-// 						string
-// 						error
-// 					}{num, nil}
-// 				}
-// 			}
-// 		}()
-// 		select {
-// 		case res := <-numberChan:
-// 			return res.string, res.error
-// 		case <-time.After(6 * time.Second):
-// 			return "", fmt.Errorf("timed out reading number")
-// 		}
-// 	}
-// }
 
 type numberResult struct {
 	Number string
@@ -431,7 +233,7 @@ func startResourceMonitor(interval time.Duration) {
 }
 
 // mainLoop orchestrates the monitoring and processing in a loop
-func mainLoop(services *Services) {
+func mainLoop(services *services.Services) {
 	ctx := context.Background()
 
 	var (
@@ -533,14 +335,15 @@ func mainLoop(services *Services) {
 		}
 		start := time.Now()
 		finalFraudScore, err := processNumber(num, &data, services.Sources)
+		logging.Info().Msgf("Final fraud score: %s", finalFraudScore)
 		// finalFraudScore, err := processNumber(num, &data, services.Sources)
 		if err != nil {
 			logging.Error().Err(err).Msg("Error processing number")
 			continue
 		}
-		if err := services.DatabaseDriver.InsertNumberIntoDatabase(ctx, data, finalFraudScore); err != nil {
-			logging.Error().Err(err).Msgf("failed to insert number %s into database", num)
-		}
+		// if err := services.DatabaseDriver.InsertNumberIntoDatabase(ctx, data, finalFraudScore); err != nil {
+		// 	logging.Error().Err(err).Msgf("failed to insert number %s into database", num)
+		// }
 
 		elapsed := time.Since(start)
 		logging.Info().Msgf("Finished one cycle. Time taken: %v", elapsed)
@@ -559,7 +362,7 @@ func main() {
 	// 	log.Println(http.ListenAndServe("localhost:6060", nil))
 	// }()
 	startResourceMonitor(10 * time.Second) // logs every 10 seconds
-	services, err := initializeServices()
+	services, err := services.InitializeServices()
 	if err != nil {
 		panic(err)
 	}

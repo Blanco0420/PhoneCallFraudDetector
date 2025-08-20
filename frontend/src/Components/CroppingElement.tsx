@@ -1,59 +1,47 @@
 import React, { useRef, useState } from "react"
 import { useEffect } from "react"
 import ReactCrop, { PixelCrop } from "react-image-crop";
-import useWebSocket from "react-use-websocket";
 import 'react-image-crop/dist/ReactCrop.css'
+import { WebsocketMessage, RoiData } from "./Websocket/types";
+import toast from "react-hot-toast";
 
-type WebsocketMessage = {
-  command: string;
-  payload: object | undefined;
+type Props = {
+  imageSrc: string | undefined;
+  sendMessage: Function;
 }
 
-const CroppingElement = () => {
-  const [imageSrc, setImageSrc] = useState<string | undefined>(undefined)
+const CroppingElement = ({ imageSrc, sendMessage }: Props) => {
   const [crop, setCrop] = useState<PixelCrop>()
   const imageRef = useRef<HTMLImageElement | null>(null)
 
-  const [socketUrl, setSocketUrl] = useState<string>(`ws://${window.location.host}/ws`)
-  const { sendMessage, lastMessage, readyState } = useWebSocket(socketUrl)
-
-  useEffect(() => {
-    if (lastMessage !== null) {
-      const base64Img = lastMessage.data
-      setImageSrc(`data:image/jpeg;base64,${base64Img}`)
-    }
-  }, [lastMessage])
 
   const pauseSystem = () => {
     const payload: WebsocketMessage = {
-      command: "stop",
-      payload: {}
+      Command: "stop",
+      Payload: null
     }
-    sendMessage(JSON.stringify(payload))
+    sendMessage(payload)
   }
 
   const sendCropData = () => {
     const image = imageRef.current;
     if (!image || !crop) {
-      console.log("No crop or no image")
+      toast.error("No crop data selected on video. Please select the RoI (Region of Interest) and submit again.")
       return
     }
     const scaleX = image.naturalWidth / image.clientWidth
     const scaleY = image.naturalHeight / image.clientHeight
-    const data = {
+    const data: RoiData = {
       x: crop.x * scaleX,
       y: crop.y * scaleY,
       width: crop.width * scaleX,
       height: crop.height * scaleY
     }
     const payload: WebsocketMessage = {
-      command: "start",
-      payload: data
+      Command: "start",
+      Payload: data
     }
-    const payloadString = JSON.stringify(payload)
-    console.log(payloadString)
-    console.log(crop)
-    sendMessage(payloadString)
+    sendMessage(payload)
   }
 
   return (
