@@ -209,7 +209,7 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	data := providers.NewNumberDetails(number)
 	// s.currentVitalInfo = &data.VitalInfo
 
-	data.Number = number
+	data.Number = &number
 	var siteInfo providers.SiteInfo
 
 	s.driver.GotoUrl(numberQuery)
@@ -231,8 +231,9 @@ func (s *JpNumberSource) GetData(number string) (providers.NumberDetails, error)
 	if err != nil {
 		return data, err
 	}
-	data.VitalInfo.LineType = lineType
-	s.VitalInfoChannel <- data.VitalInfo
+	// s.currentVitalInfo.LineType = lineType
+	// s.vitalInfoChannel <- *s.currentVitalInfo
+	data.VitalInfo.LineType = &lineType
 
 	// goto detailed page
 	detailesPagesUrl, err := s.getDetailsPageURL(lineType, number)

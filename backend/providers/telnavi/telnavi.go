@@ -136,8 +136,9 @@ func (t *TelnaviSource) getPhoneNumberInfo(data *providers.NumberDetails, tableE
 			if err != nil {
 				logging.Error().Err(err).Msgf("[%s] failed to get line type", sourceName)
 			}
-			data.VitalInfo.LineType = lineType
-			t.VitalInfoChannel <- data.VitalInfo
+			// t.currentVitalInfo.LineType = lineType
+			// t.vitalInfoChannel <- *t.currentVitalInfo
+			data.VitalInfo.LineType = &lineType
 		case "業種タグ":
 			data.VitalInfo.Industry = val
 			t.VitalInfoChannel <- data.VitalInfo
@@ -218,7 +219,8 @@ func (t *TelnaviSource) getUserCommentsContainer() (selenium.WebElement, error) 
 func (t *TelnaviSource) GetData(phoneNumber string) (providers.NumberDetails, error) {
 	logging.Info().Msgf("[%s] starting search for number: %s", sourceName, phoneNumber)
 	data := providers.NewNumberDetails(phoneNumber)
-	data.Number = phoneNumber
+	// t.currentVitalInfo = &data.VitalInfo
+	data.Number = &phoneNumber
 	phoneNumberInfoPageUrl := fmt.Sprintf("%s/%s", baseUrl, phoneNumber)
 	fmt.Printf("[telnavi] Navigating to: %s\n", phoneNumberInfoPageUrl)
 	logging.Debug().Msgf("[%s] navigating to %s", sourceName, phoneNumberInfoPageUrl)

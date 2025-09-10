@@ -102,7 +102,7 @@ func (i *IpqsSource) GetData(phoneNumber string) (providers.NumberDetails, error
 	// 		},
 	// 	},
 	// }
-	data.VitalInfo.LineType = lineType
+	data.VitalInfo.LineType = &lineType
 	data.VitalInfo.Name = &rawData.Name
 	data.VitalInfo.FraudulentDetails.FraudScore = rawData.FraudScore
 	data.VitalInfo.FraudulentDetails.RecentAbuse = rawData.RecentAbuse

@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "name": "jpnumber",
+  "baseUrl": "https://jpnumber.com",
+  "supportedCountryCodes": [
+    "JP"
+  ],
+  "numberPageSlugProcessing": "",
+  "numberPageSlug": "{PHONE_NUMBER_PART_1}"
+}

@@ -67,8 +67,8 @@ func buildFinalDisplayData(data *map[string]providers.NumberDetails) (providerda
 				}
 			}
 		}
-		if details.VitalInfo.LineType != "" {
-			lineTypes = append(lineTypes, string(details.VitalInfo.LineType))
+		if details.VitalInfo.LineType != nil {
+			lineTypes = append(lineTypes, string(*details.VitalInfo.LineType))
 			lineTypeSources = append(lineTypeSources, sourceName)
 		}
 		if details.VitalInfo.Industry != nil {
@@ -234,7 +234,7 @@ func startResourceMonitor(interval time.Duration) {
 
 // mainLoop orchestrates the monitoring and processing in a loop
 func mainLoop(services *services.Services) {
-	ctx := context.Background()
+	// ctx := context.Background()
 
 	var (
 		startChan = make(chan webcamdetection.RoiData, 1)
@@ -358,9 +358,10 @@ func bToMb(b uint64) uint64 {
 }
 
 func main() {
-	// go func() {
-	// 	log.Println(http.ListenAndServe("localhost:6060", nil))
-	// }()
+	logging.Debug().Msg("Running")
+	// if err := sourceconfig.TestProcessors(); err != nil {
+	// 	panic(err)
+	// }
 	startResourceMonitor(10 * time.Second) // logs every 10 seconds
 	services, err := services.InitializeServices()
 	if err != nil {

@@ -89,8 +89,8 @@ func (s *NumverifySource) GetData(phoneNumber string) (providers.NumberDetails, 
 	if err != nil {
 		return data, err
 	}
-	data.Number = phoneNumber
-	data.VitalInfo.LineType = lineType
+	data.Number = &phoneNumber
+	data.VitalInfo.LineType = &lineType
 	*data.Carrier = successResponse.carrier
 	*data.BusinessDetails.LocationDetails.City = successResponse.location
 

@@ -6,6 +6,7 @@ require (
 	entgo.io/ent v0.14.4
 	github.com/agnivade/levenshtein v1.2.1
 	github.com/gin-gonic/gin v1.10.1
+	github.com/gorilla/websocket v1.5.3
 	github.com/ikawaha/kagome-dict/ipa v1.2.5
 	github.com/ikawaha/kagome/v2 v2.10.2
 	github.com/lib/pq v1.10.9
@@ -39,7 +40,6 @@ require (
 	github.com/golang/protobuf v1.5.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.3.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/hashicorp/hcl/v2 v2.13.0 // indirect
 	github.com/ikawaha/kagome-dict v1.1.6 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

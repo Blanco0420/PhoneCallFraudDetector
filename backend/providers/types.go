@@ -47,13 +47,14 @@ type VitalInfo struct {
 	Name              *string
 	Industry          *string
 	CompanyOverview   *string
-	LineType          LineType
+	LineType          *LineType
 	OverallFraudScore int
 	FraudulentDetails FraudulentDetails
 }
 
 type NumberDetails struct {
-	Number          string
+	Number *string
+	//TODO: Change to enum? (like LineType)
 	Carrier         *string
 	VitalInfo       VitalInfo
 	BusinessDetails *BusinessDetails
@@ -62,8 +63,7 @@ type NumberDetails struct {
 
 func NewNumberDetails(number string) NumberDetails {
 	return NumberDetails{
-		Number:    number,
-		VitalInfo: VitalInfo{},
+		Number: &number,
 		BusinessDetails: &BusinessDetails{
 			LocationDetails: &LocationDetails{},
 		},

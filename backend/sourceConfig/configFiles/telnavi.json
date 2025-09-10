@@ -1,0 +1,10 @@
+{
+  "enabled": false,
+  "name": "telnavi",
+  "providerType": 0,
+  "baseUrl": "https://telnavi.com",
+  "numberPageSlug": "{PHONE_NUMBER_FULL}",
+  "phoneNumberMainInfoContainer": {
+    "mainSelector": ""
+  }
+}
