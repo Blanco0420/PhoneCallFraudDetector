@@ -150,11 +150,11 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 
 		lineType, err := getOrCreate(
 			func() (*ent.LineType, error) {
-				return tx.LineType.Query().Where(linetype.LineTypeEQ(details.VitalInfo.LineType)).Only(ctx)
+				return tx.LineType.Query().Where(linetype.LineTypeEQ(*details.VitalInfo.LineType)).Only(ctx)
 			},
 			func() (*ent.LineType, error) {
 				return tx.LineType.Create().
-					SetLineType(details.VitalInfo.LineType).
+					SetLineType(*details.VitalInfo.LineType).
 					Save(ctx)
 			},
 		)
@@ -164,7 +164,7 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 
 		caller, err := getOrCreate(
 			func() (*ent.Caller, error) {
-				return tx.Caller.Query().Where(caller.HasNumberWith(number.NumberEQ(details.Number))).Only(ctx)
+				return tx.Caller.Query().Where(caller.HasNumberWith(number.NumberEQ(*details.Number))).Only(ctx)
 			},
 			func() (*ent.Caller, error) {
 				return tx.Caller.Create().
@@ -179,12 +179,12 @@ func (d *DatabaseDriver) InsertNumberIntoDatabase(ctx context.Context, data map[
 
 		number, err := getOrCreate(
 			func() (*ent.Number, error) {
-				return tx.Number.Query().Where(number.NumberEQ(details.Number)).
+				return tx.Number.Query().Where(number.NumberEQ(*details.Number)).
 					Only(ctx)
 			},
 			func() (*ent.Number, error) {
 				return tx.Number.Create().
-					SetNumber(details.Number).
+					SetNumber(*details.Number).
 					SetCarrier(carrierSchema).
 					SetCaller(caller).
 					SetLinetype(lineType).
